@@ -29,6 +29,12 @@ public class Message implements Serializable {
     private int flag;
     private Map<String, String> properties;
     private byte[] body;
+    /**
+     * 拓展属性，包括但不限于如下：
+     * tags(消息tag，用于消息过滤)
+     * keys(消息索引键，用空格隔开，RocketMQ可以根据这些key快速检索消息)
+     * waitStoreMsgOK(消息发送时是否等消息存储完成后再返回)
+     */
     private String transactionId;
 
     public Message() {

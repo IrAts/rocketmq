@@ -670,17 +670,34 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             null).setResponseCode(ClientErrorCode.NOT_FOUND_TOPIC_EXCEPTION);
     }
 
+    /**
+     * 查找主题的路由信息。
+     * 如果生产者中缓存了topic的路由信息，且该路由信息中包含消息队列，则直接返回该路由信息。
+     * 如果没在缓存中找到，则向 NameServer 查找该 topic 的路由信息。
+     * 如果最终未找到路由信息，则抛出异常。
+     *
+     * @param topic
+     * @return
+     */
     private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
         TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
+        // 如果缓存中压根没有该 topic 对应的 info。
+        // 先在缓存中为该缓 topic 创建一个 info ，当然，此时的 info 尚未被初始化值。
+        // 接着就尝试从 NameServer 查询该 topic 的 routeData 并初始化到缓存的 info 中。
+        // 当然，查询的 topic 的 routeData 时可能什么都查不到（broker 没有创建该 topic 对应的队列），
+        // 这种情况下 info 仍然未被初始化，在代码层面即 info.ok() == false。
         if (null == topicPublishInfo || !topicPublishInfo.ok()) {
             this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic);
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
         }
-
+        // 分支一：如果 topic 对应的 info 信息已被初始化，那么可以直接返回。
+        // 分支二：如果 topic 对应的 info 信息未被初始化，则说明该 topic 未被 broker 创建。
+        //         此时尝试使用 默认主题 去创建该 topic。因此本次从 NameServer 查询时 isDefault 参数为 true。
         if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
             return topicPublishInfo;
         } else {
+            // 这里入参 isDefault 为 true，表示本次查询"默认主题"，即用于创建 topic 的主题。
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
             return topicPublishInfo;

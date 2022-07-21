@@ -94,7 +94,14 @@ public class MQClientInstance {
     private final static long LOCK_TIMEOUT_MILLIS = 3000;
     private final static InternalLogger log = ClientLogger.getLog();
     private final ClientConfig clientConfig;
+    /**
+     * 每个客户端实例都有 MQClientManager 生产。
+     * 该标识表示当前实例是 MQClientManager 生产的第 i 号实例。
+     */
     private final int instanceIndex;
+    /**
+     * 客户端标识：IP + "@" + 进程ID + ["@" + unitname]
+     */
     private final String clientId;
     private final long bootTimestamp = System.currentTimeMillis();
     private final ConcurrentMap<String/* group */, MQProducerInner> producerTable = new ConcurrentHashMap<String, MQProducerInner>();
