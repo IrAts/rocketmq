@@ -525,6 +525,8 @@ public class PullMessageProcessor implements NettyRequestProcessor {
 
             if (this.brokerController.getBrokerConfig().isSlaveReadEnable() && !this.brokerController.getBrokerConfig().isInBrokerContainer()) {
                 // consume too slow ,redirect to another machine
+                // 在真正的执行捞取消息时，broker 的 MessageStore 会判断本次捞取是否严重滞后（即滞后偏移量大于本机broker的页缓存使用量）。
+                // 如果严重滞后的话，MessageStore 再捞取结果中会 suggest 消费者下一次去指定服务器（WhichBrokerWhenConsumeSlowly，一般为 slave ）拉取消息。
                 if (getMessageResult.isSuggestPullingFromSlave()) {
                     responseHeader.setSuggestWhichBrokerId(subscriptionGroupConfig.getWhichBrokerWhenConsumeSlowly());
                 }

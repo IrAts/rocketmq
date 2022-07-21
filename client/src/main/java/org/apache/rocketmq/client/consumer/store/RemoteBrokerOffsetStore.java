@@ -197,16 +197,20 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
 
     /**
      * Update the Consumer Offset synchronously, once the Master is off, updated to Slave, here need to be optimized.
+     *
+     * 将本消费者的消费偏移量更新到 broker 中，优先选择更新到 master 中。
      */
     @Override
     public void updateConsumeOffsetToBroker(MessageQueue mq, long offset, boolean isOneway) throws RemotingException,
         MQBrokerException, InterruptedException, MQClientException {
+        // 【1】尝试从本地缓存获取 brokerName 的 master 的地址，如果获取不到则从 nameServer 更新信息，再次缓存查询。
         FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInSubscribe(this.mQClientFactory.getBrokerNameFromMessageQueue(mq), MixAll.MASTER_ID, false);
         if (null == findBrokerResult) {
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(mq.getTopic());
             findBrokerResult = this.mQClientFactory.findBrokerAddressInSubscribe(this.mQClientFactory.getBrokerNameFromMessageQueue(mq), MixAll.MASTER_ID, false);
         }
 
+        // 【2】创建同步消费偏移量请求，发送
         if (findBrokerResult != null) {
             UpdateConsumerOffsetRequestHeader requestHeader = new UpdateConsumerOffsetRequestHeader();
             requestHeader.setTopic(mq.getTopic());

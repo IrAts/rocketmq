@@ -1074,6 +1074,13 @@ public class MQClientInstance {
         return null;
     }
 
+    /**
+     *
+     * @param brokerName brokerName
+     * @param brokerId brokerId
+     * @param onlyThisBroker 是否仅使用 brokerId 查找 broker，实际实现中与该参数语义有偏差。
+     * @return FindBrokerResult
+     */
     public FindBrokerResult findBrokerAddressInSubscribe(
         final String brokerName,
         final long brokerId,
@@ -1088,15 +1095,19 @@ public class MQClientInstance {
 
         HashMap<Long/* brokerId */, String/* address */> map = this.brokerAddrTable.get(brokerName);
         if (map != null && !map.isEmpty()) {
+            // 根据 brokerId 获取指定的 brokerAddress
             brokerAddr = map.get(brokerId);
             slave = brokerId != MixAll.MASTER_ID;
             found = brokerAddr != null;
 
+            // 如果找不到 brokerId 指定的 brokerAddress，即 brokerId 指定的 broker 为从服务器（即 brokerId != 0）。
+            // 尝试顺延获取下一个从服务器（即 brokerId + 1 指向的服务器）。
             if (!found && slave) {
                 brokerAddr = map.get(brokerId + 1);
                 found = brokerAddr != null;
             }
 
+            // 如果到这还没找到一个目标服务器，那么直接遍历获取第一个（此时必然能获取到，因为 map.isEmpty() == false）。
             if (!found && !onlyThisBroker) {
                 Entry<Long, String> entry = map.entrySet().iterator().next();
                 brokerAddr = entry.getValue();

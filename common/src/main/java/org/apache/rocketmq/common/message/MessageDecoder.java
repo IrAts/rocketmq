@@ -723,6 +723,12 @@ public class MessageDecoder {
         return msgs;
     }
 
+    /**
+     * 将批量消息 messageExt 解压，解压出的消息放到 list 容器中。
+     *
+     * @param messageExt 消息-批量消息
+     * @param list 存放 messageExt 扁平化后 Message 的容器
+     */
     public static void decodeMessage(MessageExt messageExt, List<MessageExt> list) throws Exception {
         List<Message> messages = MessageDecoder.decodeMessages(ByteBuffer.wrap(messageExt.getBody()));
         for (int i = 0; i < messages.size(); i++) {

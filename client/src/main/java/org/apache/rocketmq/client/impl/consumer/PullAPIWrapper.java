@@ -75,8 +75,14 @@ public class PullAPIWrapper {
         final SubscriptionData subscriptionData) {
         PullResultExt pullResultExt = (PullResultExt) pullResult;
 
+        // 【1】设置该 mq 的下一次拉取消息的推荐服务器地址
+        // 在消费者拉取消息时，broker 会根据情况 suggest 该消费者下一次到哪儿去拉消息（从服务器、主服务器）。
+        // 消费者在 pullResult 中获取到该 suggest，并将建议的目标服务器设置到 pullFromWhichNodeTable。
+        // 注意：当消息拉取进度过慢时，broker 可能会建议当前消费者去从服务器拉取消息。
         this.updatePullFromWhichNode(mq, pullResultExt.getSuggestWhichBrokerId());
+
         if (PullStatus.FOUND == pullResult.getPullStatus()) {
+            // 【2】响应结果解码解压。
             ByteBuffer byteBuffer = ByteBuffer.wrap(pullResultExt.getMessageBinary());
             List<MessageExt> msgList = MessageDecoder.decodesBatch(
                 byteBuffer,
@@ -85,6 +91,7 @@ public class PullAPIWrapper {
                 true
             );
 
+            // 【3】msgList里如果存在批量消息（即多个消息被压缩为一个消息），则需要将消息扁平化
             boolean needDecodeInnerMessage = false;
             for (MessageExt messageExt: msgList) {
                 if (MessageSysFlag.check(messageExt.getSysFlag(), MessageSysFlag.INNER_BATCH_FLAG)
@@ -110,6 +117,7 @@ public class PullAPIWrapper {
                 }
             }
 
+            // 【4】如果订阅信息中存在使用 tags 过滤的条件，切没有使用 Filter 过滤，则在此处进行过滤处理。
             List<MessageExt> msgListFilterAgain = msgList;
             if (!subscriptionData.getTagsSet().isEmpty() && !subscriptionData.isClassFilterMode()) {
                 msgListFilterAgain = new ArrayList<MessageExt>(msgList.size());
@@ -122,6 +130,7 @@ public class PullAPIWrapper {
                 }
             }
 
+            // 【5】调用程序员注册的 hook 进一步处理过滤出的消息
             if (this.hasHook()) {
                 FilterMessageContext filterMessageContext = new FilterMessageContext();
                 filterMessageContext.setUnitMode(unitMode);
@@ -129,6 +138,7 @@ public class PullAPIWrapper {
                 this.executeHook(filterMessageContext);
             }
 
+            // 【6】对过滤出的消息进行最后一步的属性填充，比如：事务ID，本次拉取消息的最小偏移量，本次拉取消息的最大偏移量等。
             for (MessageExt msg : msgListFilterAgain) {
                 String traFlag = msg.getProperty(MessageConst.PROPERTY_TRANSACTION_PREPARED);
                 if (Boolean.parseBoolean(traFlag)) {
@@ -145,9 +155,12 @@ public class PullAPIWrapper {
                 }
             }
 
+            // 【7】将处理好的消息设置回 pullResultExt
             pullResultExt.setMsgFoundList(msgListFilterAgain);
         }
 
+        // 【8】到这一步，由于拉取结果里的 二进制消息体 已经被解析成消息并设置到 pullResultExt 中。
+        // 所以此时可以清空 pullResultExt 里的 二进制消息体。
         pullResultExt.setMessageBinary(null);
 
         return pullResult;
@@ -193,9 +206,12 @@ public class PullAPIWrapper {
         final CommunicationMode communicationMode,
         final PullCallback pullCallback
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+        // 从消费者本地缓存查找本次向 mq 拉取消息的请求应该发送到哪个 broker。
         FindBrokerResult findBrokerResult =
             this.mQClientFactory.findBrokerAddressInSubscribe(this.mQClientFactory.getBrokerNameFromMessageQueue(mq),
                 this.recalculatePullFromWhichNode(mq), false);
+        // 如果消费者本地缓存找不到本次拉取消息的目标 broker。
+        // 则去 NameServer 拉取最新订阅信息并更新本地缓存，然后再次尝试查找目标 broker。
         if (null == findBrokerResult) {
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(mq.getTopic());
             findBrokerResult =
@@ -203,7 +219,8 @@ public class PullAPIWrapper {
                     this.recalculatePullFromWhichNode(mq), false);
         }
 
-
+        // 如果还找不到请求发送的目标服务器，那么就报错。
+        // 如果找到了目标服务器就执行请求的生成并发送。
         if (findBrokerResult != null) {
             {
                 // check version
@@ -282,6 +299,12 @@ public class PullAPIWrapper {
         );
     }
 
+    /**
+     * 重新计算 queue 的本次拉取从哪个服务器节点拉去。
+     *
+     * @param mq
+     * @return
+     */
     public long recalculatePullFromWhichNode(final MessageQueue mq) {
         if (this.isConnectBrokerByUser()) {
             return this.defaultBrokerId;
