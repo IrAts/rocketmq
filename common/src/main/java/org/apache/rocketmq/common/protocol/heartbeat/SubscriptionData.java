@@ -30,12 +30,24 @@ public class SubscriptionData implements Comparable<SubscriptionData> {
     public final static String SUB_ALL = "*";
     private boolean classFilterMode = false;
     private String topic;
+    /**
+     * rocketmq broker允许消费者上传 filter 到 broker，broker 发送消息给消费者前调用该 filter 进行消息过滤。
+     * subString 为要上传的 filter 的 fullClassName。
+     */
     private String subString;
     private Set<String> tagsSet = new HashSet<String>();
     private Set<Integer> codeSet = new HashSet<Integer>();
     private long subVersion = System.currentTimeMillis();
     private String expressionType = ExpressionType.TAG;
 
+    /**
+     * {@link SubscriptionData#subString} 所指向 class 文件的文件内容。
+     * 也就是只要将 filterClassSource 转为二进制就可以将该过滤类传到 broker 中去。
+     *
+     * 上传 filter 到 broker 的代码：
+     * {@code MQClientInstance#uploadFilterClassToAllFilterServer(String, String, String, String)}
+     *              classBody = filterClassSource.getBytes(MixAll.DEFAULT_CHARSET);
+     */
     @JSONField(serialize = false)
     private String filterClassSource;
 
