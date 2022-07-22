@@ -75,6 +75,14 @@ public class TopicPublishInfo {
         this.haveTopicRouterInfo = haveTopicRouterInfo;
     }
 
+    /**
+     * 如果向某个 broker 发送请求时失败了，那么后续一段时间的发送会避开该失败的 broker。
+     * 具体做法就是选择 messageQueue 的时候避开 broker。此处入参的就是要避开的 broker。
+     * 入参为 null 则表示无需避开任何 broker。
+     *
+     * @param lastBrokerName 最后一次发送请求失败的 broker name。
+     * @return 尽可能避开 lastBrokerName 对应的 broker 返回一个消息队列。
+     */
     public MessageQueue selectOneMessageQueue(final String lastBrokerName) {
         if (lastBrokerName == null) {
             return selectOneMessageQueue();
