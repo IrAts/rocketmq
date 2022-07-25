@@ -317,7 +317,10 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 return;
             }
         } else {
-            // 顺序消费需要锁定 processQueue 进行消费。
+            // 如果是顺序消费，那么需要锁定 broker 的队列再拉取。
+            // 对 processQueue 的锁定和解锁在 rebalanceImpl 中完成，也就是消费者分到 message 的时后就应该锁定其对应的 processQueue。
+            // 如果锁定了 broker 的队列，但是发现 pullRequest 之前没有被锁过的话，那么说明 pullRequest 是第一次执行，需要从 broker 同步 offset。
+            // 如果没有锁 broker 的队列，那么就不能拉取消息，将拉取请求延迟。
             if (processQueue.isLocked()) {
                 if (!pullRequest.isPreviouslyLocked()) {
                     long offset = -1L;
@@ -343,7 +346,6 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     pullRequest.setNextOffset(offset);
                 }
             } else {
-                // 睡眠，确保 processQueue 在消费之前必须被锁定。
                 this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
                 log.info("pull message later because not locked in broker, {}", pullRequest);
                 return;
