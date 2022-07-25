@@ -822,6 +822,7 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
             request = RemotingCommand.createRequestCommand(RequestCode.PULL_MESSAGE, requestHeader);
         }
 
+        // 根据不同的模式拉取消息
         switch (communicationMode) {
             case ONEWAY:
                 assert false;
@@ -956,6 +957,16 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
         });
     }
 
+    /**
+     * 消息拉取客户端处理消息
+     *
+     * @param addr
+     * @param request
+     * @param timeoutMillis
+     * @param pullCallback
+     * @throws RemotingException
+     * @throws InterruptedException
+     */
     private void pullMessageAsync(
         final String addr,
         final RemotingCommand request,
@@ -968,8 +979,10 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
                 RemotingCommand response = responseFuture.getResponseCommand();
                 if (response != null) {
                     try {
+                        // 处理拉取到的消息，将结果封装为 PullResult。
                         PullResult pullResult = MQClientAPIImpl.this.processPullResponse(response, addr);
                         assert pullResult != null;
+                        // 处理请求回调，通过 PullCallback 回调至 DefaultMQPushConsumerImpl#pullMessage。
                         pullCallback.onSuccess(pullResult);
                     } catch (Exception e) {
                         pullCallback.onException(e);

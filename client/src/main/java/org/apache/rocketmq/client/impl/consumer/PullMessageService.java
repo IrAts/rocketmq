@@ -45,6 +45,12 @@ public class PullMessageService extends ServiceThread {
         this.mQClientFactory = mQClientFactory;
     }
 
+    /**
+     * PullMessageService 添加 PullRequest 的方式 - 延时添加
+     *
+     * @param pullRequest PullRequest
+     * @param timeDelay 延迟时长-毫秒
+     */
     public void executePullRequestLater(final PullRequest pullRequest, final long timeDelay) {
         if (!isStopped()) {
             this.scheduledExecutorService.schedule(new Runnable() {
@@ -58,6 +64,11 @@ public class PullMessageService extends ServiceThread {
         }
     }
 
+    /**
+     * PullMessageService 添加 PullRequest 的方式 - 立即添加
+     *
+     * @param pullRequest PullRequest
+     */
     public void executePullRequestImmediately(final PullRequest pullRequest) {
         try {
             this.messageRequestQueue.put(pullRequest);
@@ -123,12 +134,15 @@ public class PullMessageService extends ServiceThread {
     public void run() {
         log.info(this.getServiceName() + " service started");
 
+        // stopped 是 volatile 修饰的变量，用于线程间通信。
         while (!this.isStopped()) {
             try {
+                // 阻塞队列， 如果 pullRequestQueue 没有元素，则阻塞
                 MessageRequest messageRequest = this.messageRequestQueue.take();
                 if (messageRequest.getMessageRequestMode() == MessageRequestMode.POP) {
                     this.popMessage((PopRequest)messageRequest);
                 } else {
+                    // 消息拉取
                     this.pullMessage((PullRequest)messageRequest);
                 }
             } catch (InterruptedException ignored) {

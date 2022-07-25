@@ -290,6 +290,22 @@ public class PullMessageProcessor implements NettyRequestProcessor {
         return false;
     }
 
+    /**
+     * 消息服务端 broker 组装消息。
+     * 1、根据订阅消息，构建消息过滤器
+     * 2、调用 MessageStore.getMessage 查找消息
+     * 3、根据主题名与队列编号获取消息消费队列
+     * 4、消息偏移量异常情况校对下一次拉取偏移量
+     * 5、根据 PullRequest 填充 responseHeader 的 nextBeginOffset、minOffset、maxOffset
+     * 6、根据主从同步延迟，如果从节点数据包含下一次拉取的偏移量，设置下一次拉取任务的 brokerId
+     * 7、如果 commitlog 标记可用并且当前节点为主节点，则更新消息消费进度
+     *
+     * @param channel Channel
+     * @param request RemotingCommand
+     * @param brokerAllowSuspend brokerAllowSuspend
+     * @return RemotingCommand
+     * @throws RemotingCommandException RemotingCommand
+     */
     private RemotingCommand processRequest(final Channel channel, RemotingCommand request, boolean brokerAllowSuspend)
         throws RemotingCommandException {
         RemotingCommand response = RemotingCommand.createResponseCommand(PullMessageResponseHeader.class);
@@ -301,12 +317,14 @@ public class PullMessageProcessor implements NettyRequestProcessor {
 
         LOGGER.debug("receive PullMessage request command, {}", request);
 
+        // 校验：当前 broker 是否可读。
         if (!PermName.isReadable(this.brokerController.getBrokerConfig().getBrokerPermission())) {
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark(String.format("the broker[%s] pulling message is forbidden", this.brokerController.getBrokerConfig().getBrokerIP1()));
             return response;
         }
 
+        // 校验：请求为 lite pull message 且 broker 不支持 lite pull message。
         if (request.getCode() == RequestCode.LITE_PULL_MESSAGE && !this.brokerController.getBrokerConfig().isLitePullMessageEnable()) {
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark(
@@ -314,6 +332,7 @@ public class PullMessageProcessor implements NettyRequestProcessor {
             return response;
         }
 
+        // 查询请求对应的消费者组的订阅配置。
         SubscriptionGroupConfig subscriptionGroupConfig =
             this.brokerController.getSubscriptionGroupManager().findSubscriptionGroupConfig(requestHeader.getConsumerGroup());
         if (null == subscriptionGroupConfig) {
@@ -329,9 +348,11 @@ public class PullMessageProcessor implements NettyRequestProcessor {
             return response;
         }
 
+        // 消息消费者在内存中是否缓存了消息消费进度，如果缓存了则该标志为 true。
         final boolean hasCommitOffsetFlag = PullSysFlag.hasCommitOffsetFlag(requestHeader.getSysFlag());
         final boolean hasSubscriptionFlag = PullSysFlag.hasSubscriptionFlag(requestHeader.getSysFlag());
 
+        // 获取 topic 的配置信息。
         TopicConfig topicConfig = this.brokerController.getTopicConfigManager().selectTopicConfig(requestHeader.getTopic());
         if (null == topicConfig) {
             LOGGER.error("the topic {} not exist, consumer: {}", requestHeader.getTopic(), RemotingHelper.parseChannelRemoteAddr(channel));
@@ -646,6 +667,10 @@ public class PullMessageProcessor implements NettyRequestProcessor {
             response.setRemark("store getMessage return null");
         }
 
+        // 尝试更新消费者进度。
+        // brokerAllowSuspend：broker 是否允许挂起，在消息拉取时该值默认为 true。
+        // hasCommitOffsetFlag：消息消费者在内存中是否缓存了消息消费进度，如果缓存了则该标志为 true。
+        // 如果 broker 为 master 并且上面两个变量为 true，则使用 commitOffset 更新消息消费进度。
         boolean storeOffsetEnable = brokerAllowSuspend;
         storeOffsetEnable = storeOffsetEnable && hasCommitOffsetFlag;
         if (storeOffsetEnable) {
