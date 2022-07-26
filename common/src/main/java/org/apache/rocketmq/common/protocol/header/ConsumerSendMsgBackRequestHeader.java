@@ -24,16 +24,22 @@ import org.apache.rocketmq.remoting.annotation.CFNullable;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class ConsumerSendMsgBackRequestHeader implements CommandCustomHeader {
+    // 消息物理偏移量
     @CFNotNull
     private Long offset;
+    // 消费组
     @CFNotNull
     private String group;
+    // 延迟等级
     @CFNotNull
     private Integer delayLevel;
+    // 消息ID
     private String originMsgId;
+    // 消息主题
     private String originTopic;
     @CFNullable
     private boolean unitMode = false;
+    // 最大重新消费次数，默认 16 次   SubscriptionGroupConfig.retryMaxTimes 中定义
     private Integer maxReconsumeTimes;
 
     @Override

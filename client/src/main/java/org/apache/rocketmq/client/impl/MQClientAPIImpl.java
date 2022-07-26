@@ -1451,6 +1451,11 @@ public class MQClientAPIImpl implements NameServerUpdateCallback {
         return response.getCode() == ResponseCode.SUCCESS;
     }
 
+    /**
+     * 当客户端调用 MQClientAPIImpl#consumerSendMessageBack 发送消息时，
+     * 服务端由 SendMessageProcessor#consumerSendMsgBack 接收此次请求。
+     *
+     */
     public void consumerSendMessageBack(
         final String addr,
         final MessageExt msg,

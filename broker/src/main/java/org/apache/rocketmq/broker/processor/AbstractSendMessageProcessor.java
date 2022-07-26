@@ -85,6 +85,19 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
         this.consumeMessageHookList = consumeMessageHookList;
     }
 
+    /**
+     * 1、先获取消费组订阅配置信息，不存在则直接返回
+     * 2、创建主题：%RETRY% + group，并随机选择一个队列
+     * 3、用原来的消息，创建一个新的消息
+     * 4、如果重试消息的最大重试次数超过 16 次（默认），则将消息放入 %DLQ% 队列。等待人工处理
+     * 5、由 Commitlog.putMessage 存入消息。
+     * 如果以上某个环节出现错误，会导致消息客户端重新封装新的 ConsumeRequest，并延迟 5s 执行。
+     *
+     * @param ctx
+     * @param request
+     * @return
+     * @throws RemotingCommandException
+     */
     protected RemotingCommand consumerSendMsgBack(final ChannelHandlerContext ctx, final RemotingCommand request)
         throws RemotingCommandException {
         final RemotingCommand response = RemotingCommand.createResponseCommand(null);
@@ -103,6 +116,7 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
         // It may be a master broker or a slave broker
         final BrokerController currentBroker = this.brokerController;
 
+        // 1、先获取消费组订阅配置信息，不存在的话直接返回
         SubscriptionGroupConfig subscriptionGroupConfig =
             masterBroker.getSubscriptionGroupManager().findSubscriptionGroupConfig(requestHeader.getGroup());
         if (null == subscriptionGroupConfig) {
@@ -112,19 +126,20 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
             return response;
         }
 
+        // 队列权限判断
         BrokerConfig masterBrokerConfig = masterBroker.getBrokerConfig();
         if (!PermName.isWriteable(masterBrokerConfig.getBrokerPermission())) {
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark("the broker[" + masterBrokerConfig.getBrokerIP1() + "] sending message is forbidden");
             return response;
         }
-
         if (subscriptionGroupConfig.getRetryQueueNums() <= 0) {
             response.setCode(ResponseCode.SUCCESS);
             response.setRemark(null);
             return response;
         }
 
+        // 创建新的主题 %RETRY% + group ，并随机选择一个队列
         String newTopic = MixAll.getRetryTopic(requestHeader.getGroup());
         int queueIdInt = Math.abs(this.random.nextInt() % 99999999) % subscriptionGroupConfig.getRetryQueueNums();
 
@@ -132,7 +147,6 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
         if (requestHeader.isUnitMode()) {
             topicSysFlag = TopicSysFlag.buildSysFlag(false, true);
         }
-
         // Create retry topic to master broker
         TopicConfig topicConfig = masterBroker.getTopicConfigManager().createTopicInSendMessageBackMethod(
             newTopic,
@@ -143,22 +157,20 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
             response.setRemark("topic[" + newTopic + "] not exist");
             return response;
         }
-
         if (!PermName.isWriteable(topicConfig.getPerm())) {
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark(String.format("the topic[%s] sending message is forbidden", newTopic));
             return response;
         }
 
-        // Look message from the origin message store
+        // 3、根据 偏移量 获取重试的消息，并创建一个新的消息。
+        // 因为 ConsumerSendMsgBackRequestHeader 并不包含消息体，只会把重试消息的 偏移量 传递过来。
         MessageExt msgExt = currentBroker.getMessageStore().lookMessageByOffset(requestHeader.getOffset());
         if (null == msgExt) {
             response.setCode(ResponseCode.SYSTEM_ERROR);
             response.setRemark("look message by offset failed, " + requestHeader.getOffset());
             return response;
         }
-
-        //for logic queue
         if (requestHeader.getOriginTopic() != null
             && !msgExt.getTopic().equals(requestHeader.getOriginTopic())) {
             //here just do some fence in case of some unexpected offset is income
@@ -174,7 +186,7 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
         msgExt.setWaitStoreMsgOK(false);
 
         int delayLevel = requestHeader.getDelayLevel();
-
+        // 4、消息超过最大重试次数，默认最大重试 16 次，则将消息放入 %DLQ% 队列。等待人工处理
         int maxReconsumeTimes = subscriptionGroupConfig.getRetryMaxTimes();
         if (request.getVersion() >= MQVersion.Version.V3_4_9.ordinal()) {
             Integer times = requestHeader.getMaxReconsumeTimes();
@@ -182,8 +194,10 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
                 maxReconsumeTimes = times;
             }
         }
-
         boolean isDLQ = false;
+        // 如果消息重试次数超过 maxReconsumeTimes，再次改写 newTopic 主题为 %DLQ%，
+        // 该主题的权限为只写，说明消息一旦进入到 DLQ 队列中，RocketMQ 将不在负责再次调度
+        // 消费，需要人工干预。
         if (msgExt.getReconsumeTimes() >= maxReconsumeTimes
             || delayLevel < 0) {
 
@@ -210,6 +224,7 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
             msgExt.setDelayTimeLevel(delayLevel);
         }
 
+        // 按照原消息，创建一个新的消息，主题： %RETRY% + group
         MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
         msgInner.setTopic(newTopic);
         msgInner.setBody(msgExt.getBody());
@@ -232,6 +247,7 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
         boolean succeeded = false;
 
         // Put retry topic to master message store
+        // 交由 commitlog 存入消息
         PutMessageResult putMessageResult = masterBroker.getMessageStore().putMessage(msgInner);
         if (putMessageResult != null) {
             String commercialOwner = request.getExtFields().get(BrokerStatsManager.COMMERCIAL_OWNER);
