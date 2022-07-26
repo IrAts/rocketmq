@@ -428,6 +428,17 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             return messageQueue;
         }
 
+        /**
+         * 1、ConsumerMessageOrderly 在消费时，消费线程池中，只会有一个线程在消费
+         * 2、ConsumerMessageOrderly 的消费是以时间为单位，一个消费组内的线程，默认最多消费 60s
+         * 3、每次从处理队列中拉取 1 条（默认）消息，如果为null，则表示没有消息，退出本次循环
+         * 4、在消费消息前，执行 钩子函数 （ConsumeMessageHook）
+         * 5、真正开始消费消息时，需要将消息上锁。如果消息未被丢弃，则执行，我们编写的业务代码
+         * 6、执行消费后 钩子函数（ConsumeMessageHook）
+         * 7、如果消费成功，则提交消费进度（即从 ProcessQueue 中删除该批消息）
+         * 8、如果消费失败，若 消息重试次数大于或等于允许的最大重试次数，消息最终会被送入 DLQ 队列。若不允许重试，那么该批消息将会被提交（即消费成功）
+         * 9、消费成功后，保存消费进度
+         */
         @Override
         public void run() {
             if (this.processQueue.isDropped()) {
