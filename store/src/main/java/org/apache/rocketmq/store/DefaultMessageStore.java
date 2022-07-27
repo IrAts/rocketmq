@@ -97,30 +97,54 @@ public class DefaultMessageStore implements MessageStore {
 
     public final PerfCounter.Ticks perfs = new PerfCounter.Ticks(LOGGER);
 
+    /**
+     * 消息存储配置属性
+     */
     private final MessageStoreConfig messageStoreConfig;
-    // CommitLog
+    /**
+     * CommitLog 文件的存储实现类
+     */
     private final CommitLog commitLog;
-
+    /**
+     * 消息队列存储缓存表
+     */
+    // ConcurrentMap<String/* topic */, ConcurrentMap<Integer/* queueId */, ConsumeQueueInterface>> consumeQueueTable;
     private final ConsumeQueueStore consumeQueueStore;
-
+    /**
+     * 消息队列文件 ComsumeQueue 刷盘线程
+     */
     private final FlushConsumeQueueService flushConsumeQueueService;
-
+    /**
+     * 清除 CommitLog 文件服务
+     */
     private final CleanCommitLogService cleanCommitLogService;
-
+    /**
+     * 清除 ComsumeQueue 文件服务
+     */
     private final CleanConsumeQueueService cleanConsumeQueueService;
 
     private final CorrectLogicOffsetService correctLogicOffsetService;
-
+    /**
+     * 索引文件实现类
+     */
     private final IndexService indexService;
-
+    /**
+     * MappedFile 分配服务
+     */
     private final AllocateMappedFileService allocateMappedFileService;
-
+    /**
+     * tLog 消息分发，根据 CommitLog 文件构建 ConsumeQueue、IndexFile 文件
+     */
     private ReputMessageService reputMessageService;
-
+    /**
+     * 存储 HA 机制
+     */
     private HAService haService;
 
     private final StoreStatsService storeStatsService;
-
+    /**
+     * 消息堆内存缓存
+     */
     private final TransientStorePool transientStorePool;
 
     private final RunningFlags runningFlags = new RunningFlags();
@@ -128,15 +152,25 @@ public class DefaultMessageStore implements MessageStore {
 
     private final ScheduledExecutorService scheduledExecutorService;
     private final BrokerStatsManager brokerStatsManager;
+    /**
+     * 消息拉取长轮询模式消息达到监听器
+     */
     private final MessageArrivingListener messageArrivingListener;
+    /**
+     * broker 配置属性
+     */
     private final BrokerConfig brokerConfig;
 
     private volatile boolean shutdown = true;
-
+    /**
+     * 文件刷盘检测点
+     */
     private StoreCheckpoint storeCheckpoint;
 
     private AtomicLong printTimes = new AtomicLong(0);
-
+    /**
+     * CommitLog 文件转发请求
+     */
     private final LinkedList<CommitLogDispatcher> dispatcherList;
 
     private RandomAccessFile lockFile;

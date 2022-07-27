@@ -775,6 +775,7 @@ public class CommitLog implements Swappable {
 
     public CompletableFuture<PutMessageResult> asyncPutMessage(final MessageExtBrokerInner msg) {
         // Set the storage time
+        // 如果没有开启复制机制，那么将存储消息的时间设置为当前时刻
         if (!defaultMessageStore.getMessageStoreConfig().isDuplicationEnable()) {
             msg.setStoreTimestamp(System.currentTimeMillis());
         }
@@ -816,10 +817,12 @@ public class CommitLog implements Swappable {
         int needAckNums = this.defaultMessageStore.getMessageStoreConfig().getInSyncReplicas();
         boolean needHandleHA = needHandleHA(msg);
 
+        // 如果启动了高可用机制，那么判断可以同步当前消息的机器是否足够，不够的话返回存储消息失败。
         if (needHandleHA && this.defaultMessageStore.getBrokerConfig().isEnableControllerMode()) {
             if (this.defaultMessageStore.getHaService().inSyncReplicasNums(currOffset) < this.defaultMessageStore.getMessageStoreConfig().getMinInSyncReplicas()) {
                 return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.IN_SYNC_REPLICAS_NOT_ENOUGH, null));
             }
+            //
             if (this.defaultMessageStore.getMessageStoreConfig().isAllAckInSyncStateSet()) {
                 // -1 means all ack in SyncStateSet
                 needAckNums = MixAll.ALL_ACK_IN_SYNC_STATE_SET;

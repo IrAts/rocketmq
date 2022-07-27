@@ -22,6 +22,20 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * 顶层消息-使用者的视图
+ * 使用者永远是懒的，在搭建一个框架/系统时，对外暴露的模型必须足够的简单。
+ * 对于使用者，只需要知道 topic、flag、properties、body 即可。
+ * 使用者不需要知道更多的属性如：brokerName、queueId 等。
+ *
+ * 所以 Message 的实现进行了分层，对不同的对对象提供不同的视图。
+ * Message 面向使用者，使用者只需要简单知道些许属性。
+ * MessageExt 面向客户端的内部实现，客户端的实现需要知道消息如何发，发去哪。
+ * MessageClientExt 面向客户端的内部实现，简单的包装 MessageExt 而已。
+ * MessageExtBrokerInner 面向 broker 的内部实现，broker 也是一个客户端，同时 broker 还要负责存储。
+ * 可见，每往底层走，属性就会被丰富。
+ *
+ */
 public class Message implements Serializable {
     private static final long serialVersionUID = 8445773977080406428L;
 
