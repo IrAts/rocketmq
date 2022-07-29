@@ -30,6 +30,15 @@ import java.util.concurrent.ConcurrentMap;
 import org.apache.rocketmq.common.statictopic.TopicQueueMappingInfo;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
+/**
+ * <h1>Topic 的路由信息</h1>
+ * 客户端通过该实体可以找到对应Topic 的路有消息，如：
+ *  <li/>顺序 topic 的配置
+ *  <li/>topic 的 message queue 元数据集合
+ *  <li/>topic 的存储 broker 元数据集合
+ *  <li/>broker 上过滤服务器的地址列表
+ *
+ */
 public class TopicRouteData extends RemotingSerializable {
     private String orderTopicConf;
     /**

@@ -204,8 +204,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.defaultMQProducer.changeInstanceNameToPID();
                 }
 
+                // 获取一个客户端实例，如果已经有了那从 MQClientManager 中获取，如果没有就创建一个并存储于 MQClientManager
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
 
+                // 将当前 生产者 注册到 客户端实例 中
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
                 if (!registerOK) {
                     this.serviceState = ServiceState.CREATE_JUST;
@@ -214,9 +216,16 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         null);
                 }
 
+                // 将 自动创建topic 的主题的 TopicPublishInfo 缓存
                 this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
 
+                // 启动客户端实例，如果已经启动过的话那么该方法什么都不干。
+                // 由于同一jvm内的生产者/消费者底层都会使用同一个客户端，所以该客户端可能已经被先前的生产者/消费者启动。
                 if (startFactory) {
+                    // 1、启动 remoteClient 通信
+                    // 2、启动各种定时任务
+                    // 3、启动拉取消息服务
+                    // 4、启动重平衡服务
                     mQClientFactory.start();
                 }
 
@@ -234,9 +243,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             default:
                 break;
         }
-
+        // 发送信条到所有 broker。
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
+        // 启动处理超时请求的服务。
         RequestFutureHolder.getInstance().startScheduledTask(this);
 
     }

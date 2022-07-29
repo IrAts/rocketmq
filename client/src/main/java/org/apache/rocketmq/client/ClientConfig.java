@@ -31,11 +31,33 @@ import org.apache.rocketmq.remoting.protocol.LanguageCode;
 import org.apache.rocketmq.remoting.protocol.RequestType;
 
 /**
- * Client Common configuration
+ * 客户端配置类，包含客户端的通用配置，如：
+ *  客户端连接的 nameServer 的地址：namesrvAddr
+ *  客户端IP：clientIP
+ *  客户端实例名称：instanceName
+ *  客户端执行回调的线程池线程数量：clientCallbackExecutorThreads
+ *  客户端的命名空间：namespace
+ *  客户端的命名空间是否被初始化：namespaceInitialized
+ *  访问通道：accessChannel
+ *
+ *  从 nameServer 拉取 topic 信息的时间间隔
+ *  向 broker 发送心跳帧的时间间隔
+ *  消费者持久化偏移量的时间间隔
+ *  当出现拉取信息异常时延迟拉取的时间间隔
+ *  是否需要解码 message body
+ *  是否需要解压 message body
+ *  是否使用 TLS 协议
+ *  客户端 API 超时时长
  */
 public class ClientConfig {
     public static final String SEND_MESSAGE_WITH_VIP_CHANNEL_PROPERTY = "com.rocketmq.sendMessageWithVIPChannel";
+    /**
+     * 配置 [decodeReadBody] 的 key
+     */
     public static final String DECODE_READ_BODY = "com.rocketmq.read.body";
+    /**
+     * 配置 [decodeDecompressBody] 的 key
+     */
     public static final String DECODE_DECOMPRESS_BODY = "com.rocketmq.decompress.body";
     private String namesrvAddr = NameServerAddressUtils.getNameServerAddresses();
     private String clientIP = RemotingUtil.getLocalAddress();
@@ -46,21 +68,30 @@ public class ClientConfig {
     protected AccessChannel accessChannel = AccessChannel.LOCAL;
 
     /**
-     * Pulling topic information interval from the named server
+     * 从 nameServer 拉取 topic 信息的时间间隔（单位：毫秒）
      */
     private int pollNameServerInterval = 1000 * 30;
     /**
-     * Heartbeat interval in microseconds with message broker
+     * 向 broker 发送心跳帧的时间间隔（单位：毫秒）
      */
     private int heartbeatBrokerInterval = 1000 * 30;
     /**
-     * Offset persistent interval for consumer
+     * 消费者持久化偏移量的时间间隔（单位：毫秒）
      */
     private int persistConsumerOffsetInterval = 1000 * 5;
+    /**
+     * 当出现拉取信息异常时延迟拉取的时间间隔（时间：毫秒）
+     */
     private long pullTimeDelayMillsWhenException = 1000;
     private boolean unitMode = false;
     private String unitName;
+    /**
+     * 是否需要解码 message body
+     */
     private boolean decodeReadBody = Boolean.parseBoolean(System.getProperty(DECODE_READ_BODY, "true"));
+    /**
+     * 是否需要解压 message body，仅当 decodeReadBody 为 true 时本参数才会被使用
+     */
     private boolean decodeDecompressBody = Boolean.parseBoolean(System.getProperty(DECODE_DECOMPRESS_BODY, "true"));
     private boolean vipChannelEnabled = Boolean.parseBoolean(System.getProperty(SEND_MESSAGE_WITH_VIP_CHANNEL_PROPERTY, "false"));
 
@@ -81,6 +112,7 @@ public class ClientConfig {
         sb.append(this.getClientIP());
 
         sb.append("@");
+        // {PID}#{nanoTime}
         sb.append(this.getInstanceName());
         if (!UtilAll.isBlank(this.unitName)) {
             sb.append("@");

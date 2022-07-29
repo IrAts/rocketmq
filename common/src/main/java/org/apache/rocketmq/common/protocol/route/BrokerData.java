@@ -26,6 +26,12 @@ import java.util.Random;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.rocketmq.common.MixAll;
 
+/**
+ * <li/>cluster
+ * <li/>brokerName
+ * <li/>HashMap<Long(brokerId), String(broker address)]> brokerAddrs
+ * <li/>是否启用代理master，用于旧版本HA适配
+ */
 public class BrokerData implements Comparable<BrokerData> {
     private String cluster;
     private String brokerName;

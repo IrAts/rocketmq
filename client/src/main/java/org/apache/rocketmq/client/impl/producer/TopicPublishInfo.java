@@ -23,11 +23,27 @@ import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.common.protocol.route.QueueData;
 import org.apache.rocketmq.common.protocol.route.TopicRouteData;
 
+/**
+ * <h1>Topic 的发布信息</h1>
+ * 客户端通过该实体查询对应 Topic 下队列的 broker 地址等信息。
+ *
+ * <h1>属性</h1>
+ * <li/>是否是顺序消息：orderTopic
+ * <li/>是否有该 Topic 的路由信息：haveTopicRouterInfo
+ * <li/>该主题队列的消息队列：messageQueueList
+ * <li/>该 topic 选择 Message Queue 的次数：sendWhichQueue
+ * <li/>路由信息：topicRouteData
+ */
 public class TopicPublishInfo {
     /**
      * 是否是顺序消息
      */
     private boolean orderTopic = false;
+    /**
+     * 是否有该 Topic 的路由信息。
+     * 在从 Name Server 中拉取到路由信息后会将路由信息设置到 topicRouteData 字段。
+     * 然后将该字段设置为 true。
+     */
     private boolean haveTopicRouterInfo = false;
     /**
      * 该主题队列的消息队列

@@ -271,6 +271,7 @@ public class MQClientInstance {
                     // Start rebalance service
                     this.rebalanceService.start();
                     // Start push service
+                    // 意在变更 defaultMQProducer.getDefaultMQProducerImpl() 的状态为 RUNNING
                     this.defaultMQProducer.getDefaultMQProducerImpl().start(false);
                     log.info("the client factory [{}] start OK", this.clientId);
                     this.serviceState = ServiceState.RUNNING;
@@ -639,7 +640,7 @@ public class MQClientInstance {
             if (this.lockNamesrv.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
                 try {
                     TopicRouteData topicRouteData;
-                    if (isDefault && defaultMQProducer != null) {
+                    if (isDefault && defaultMQProducer != null) { // 查询默认队列
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                             clientConfig.getMqClientApiTimeout());
                         if (topicRouteData != null) {
@@ -649,9 +650,14 @@ public class MQClientInstance {
                                 data.setWriteQueueNums(queueNums);
                             }
                         }
-                    } else {
+                    } else { // 查询指定的 topic
                         topicRouteData = this.mQClientAPIImpl.getTopicRouteInfoFromNameServer(topic, clientConfig.getMqClientApiTimeout());
                     }
+                    // 如果查询到 topicRouteData，并且 topicRouteData 与 旧topicRouteData 有变更的话。
+                    // 1、更新该 topic 的 brokerAddr 到 brokerAddrTable。
+                    // 2、更新该 topic 的 Message to BrokerName 信息到 topicEndPointsTable。
+                    // 3、更新该 topic 的 TopicPublishInfo 信息。
+                    // 4、更新该 topic 的 subscribeInfo 信息。
                     if (topicRouteData != null) {
                         TopicRouteData old = this.topicRouteTable.get(topic);
                         boolean changed = topicRouteDataIsChange(old, topicRouteData);
