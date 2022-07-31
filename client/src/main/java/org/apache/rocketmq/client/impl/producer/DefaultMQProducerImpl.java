@@ -538,6 +538,13 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         return this.mqFaultStrategy.selectOneMessageQueue(tpInfo, lastBrokerName);
     }
 
+    /**
+     *
+     * @param brokerName broker 名称
+     * @param currentLatency 本次消息发送的延迟时间
+     * @param isolation 是否规避 broker，如果为 true 则使用默认时长 30s 来计算规避时长，
+     *                  如果为 false 则使用本次消息发送延迟时间来计算规避时间
+     */
     public void updateFaultItem(final String brokerName, final long currentLatency, boolean isolation) {
         this.mqFaultStrategy.updateFaultItem(brokerName, currentLatency, isolation);
     }
@@ -625,6 +632,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         }
                     } catch (RemotingException e) {
                         endTimestamp = System.currentTimeMillis();
+                        // 发送失败，将当前次发送消息的 MessageQueue 所在的 broker 的 name 记录到 latencyFaultTolerance 中（当然，前提是启动了 sendLatencyFaultEnable）。
+                        // 实际上，如果没有开启 sendLatencyFaultEnable 同样也会进行故障规避，但是仅会在本次消息的重试中规避，下一次消息发送仍然会使用失败的 broker。
+                        // 而开启了 sendLatencyFaultEnable 的话，在接下来一段时间内，所有消息的发送都会尽量规避失败 broker。
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, true);
                         log.warn(String.format("sendKernelImpl exception, resend at once, InvokeID: %s, RT: %sms, Broker: %s", invokeID, endTimestamp - beginTimestampPrev, mq), e);
                         log.warn(msg.toString());
@@ -769,7 +779,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             byte[] prevBody = msg.getBody();
             try {
                 //for MessageBatch,ID has been set in the generating process
-                // 2、为消息分配全局唯一ID，消息体超过4kb，则采用ZIP压缩。
+                // 2、为消息分配全局唯一ID。
+                //
                 if (!(msg instanceof MessageBatch)) {
                     MessageClientIDSetter.setUniqID(msg);
                 }
@@ -779,7 +790,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     msg.setInstanceId(this.mQClientFactory.getClientConfig().getNamespace());
                     topicWithNamespace = true;
                 }
-                // 压缩，如果必要的话。
+                // 消息体超过4kb，则采用ZIP压缩，并设置消息的系统标记为 MessageSysFlag.COMPRESSED_FLAG。
                 int sysFlag = 0;
                 boolean msgBodyCompressed = false;
                 if (this.tryToCompressMessage(msg)) {
@@ -787,15 +798,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     sysFlag |= compressType.getCompressionFlag();
                     msgBodyCompressed = true;
                 }
-
+                // 如果是事务 Prepared 消息，则设置消息的系统标记为 MessageSysFlag.TRANSACTION_PREPARED_TYPE
                 final String tranMsg = msg.getProperty(MessageConst.PROPERTY_TRANSACTION_PREPARED);
                 if (Boolean.parseBoolean(tranMsg)) {
                     sysFlag |= MessageSysFlag.TRANSACTION_PREPARED_TYPE;
                 }
 
-                // 如果注册了消息发送钩子函数，则执行消息发送之前的增强逻辑。
-                // 通过DefaultMQProducerImpl#registerSendMessageHook()
-                // 注册钩子处理类，且可以注册多个。
                 if (hasCheckForbiddenHook()) {
                     CheckForbiddenContext checkForbiddenContext = new CheckForbiddenContext();
                     checkForbiddenContext.setNameSrvAddr(this.defaultMQProducer.getNamesrvAddr());
@@ -807,7 +815,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     checkForbiddenContext.setUnitMode(this.isUnitMode());
                     this.executeCheckForbiddenHook(checkForbiddenContext);
                 }
-
+                // 如果注册了消息发送钩子函数，则执行消息发送之前的增强逻辑。
+                // 通过DefaultMQProducerImpl#registerSendMessageHook()
+                // 注册钩子处理类，且可以注册多个。
                 if (this.hasSendMessageHook()) {
                     context = new SendMessageContext();
                     context.setProducer(this);
@@ -830,6 +840,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
 
                 // 4、构造消息发送消息包
+                // 主要包含如下重要属性：
+                //     生产者组、主题名称、默认创建主题Key、该主题在单个Broker上的默认队列数、队列ID（队列序号）、
+                //     消息系统标记（MessageSysFlag）、消息发送时间、消息标记tag（RockerMQ对标记不作任何处理，供应用程序使用）、
+                //     消息扩展属性、消息重试次数、是否是批量消息等。
                 SendMessageRequestHeader requestHeader = new SendMessageRequestHeader();
                 requestHeader.setProducerGroup(this.defaultMQProducer.getProducerGroup());
                 requestHeader.setTopic(msg.getTopic());
@@ -918,7 +932,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         assert false;
                         break;
                 }
-
+                // 6、如果注册了消息发送钩子函数，则执行其 after 逻辑。
+                // 注意：即使消息发送过程中发生了 Exception，该方法也会执行。
                 if (this.hasSendMessageHook()) {
                     context.setSendResult(sendResult);
                     this.executeSendMessageHookAfter(context);

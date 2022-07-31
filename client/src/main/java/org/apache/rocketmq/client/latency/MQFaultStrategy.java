@@ -22,6 +22,9 @@ import org.apache.rocketmq.client.log.ClientLogger;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.logging.InternalLogger;
 
+/**
+ * 消息失败策略，延迟实现的实现类
+ */
 public class MQFaultStrategy {
     private final static InternalLogger log = ClientLogger.getLog();
     private final LatencyFaultTolerance<String> latencyFaultTolerance = new LatencyFaultToleranceImpl();
@@ -98,6 +101,14 @@ public class MQFaultStrategy {
         return tpInfo.selectOneMessageQueue(lastBrokerName);
     }
 
+    /**
+     * 更新失败条目
+     *
+     * @param brokerName broker 名称
+     * @param currentLatency 消息发送故障的延迟时间
+     * @param isolation 是否规避 broker，如果为 true 则使用默认时长 30s 来计算规避时长，
+     *                  如果为 false 则使用本次消息发送延迟时间来计算规避时间
+     */
     public void updateFaultItem(final String brokerName, final long currentLatency, boolean isolation) {
         if (this.sendLatencyFaultEnable) {
             long duration = computeNotAvailableDuration(isolation ? 30000 : currentLatency);
@@ -105,6 +116,14 @@ public class MQFaultStrategy {
         }
     }
 
+    /**
+     * 1、从 latencyMax 尾部向前找到第一个比 currentLatency 小的值的索引 index。
+     * 2、然后使用 index 从 notAvailableDuration 获取对应的市场，在这个时长内 broker 将不可用。
+     * 3、如果第一步没找到则返回0。
+     *
+     * @param currentLatency
+     * @return
+     */
     private long computeNotAvailableDuration(final long currentLatency) {
         for (int i = latencyMax.length - 1; i >= 0; i--) {
             if (currentLatency >= latencyMax[i])

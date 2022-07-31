@@ -119,6 +119,9 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
     private final RPCHook rpcHook;
     private volatile ServiceState serviceState = ServiceState.CREATE_JUST;
     private MQClientInstance mQClientFactory;
+    /**
+     * 消费者拉取消息相关的操作将委托给 PullAPIWrapper，如：解码解压，pull消息，pop消息
+     */
     private PullAPIWrapper pullAPIWrapper;
     private volatile boolean pause = false;
     private boolean consumeOrderly = false;

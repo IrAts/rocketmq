@@ -466,9 +466,18 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
         return response;
     }
 
+    /**
+     * 检查消息
+     *  1、检查 broker 是否有写权限
+     *  2、检查 topic 是否可以进行消息发送。主要针对默认主题，默认主题不能发送消息，仅供路由查找。
+     *  3、在 NameServer 端存储主题的配置信息，默认路径为${ROCKET_HOME}/store/config/topic.json
+     *     主题存储信息：是否顺序消息、权限码、读队列数量、写队列数量、主题名称、topic flag、主题过滤方式。
+     *  4、检查队列，如果队列不合法则返回错误码。
+     */
     protected RemotingCommand msgCheck(final ChannelHandlerContext ctx,
         final SendMessageRequestHeader requestHeader, final RemotingCommand request,
         final RemotingCommand response) {
+        // 1、检查 broker 是否有写权限
         if (!PermName.isWriteable(this.brokerController.getBrokerConfig().getBrokerPermission())
             && this.brokerController.getTopicConfigManager().isOrderTopic(requestHeader.getTopic())) {
             response.setCode(ResponseCode.NO_PERMISSION);
@@ -480,10 +489,12 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
         if (!TopicValidator.validateTopic(requestHeader.getTopic(), response)) {
             return response;
         }
+        // 2、检查 topic 是否可以进行消息发送。主要针对默认主题，默认主题不能发送消息，仅供路由查找。
         if (TopicValidator.isNotAllowedSendTopic(requestHeader.getTopic(), response)) {
             return response;
         }
-
+        // 3、在 NameServer 端存储主题的配置信息，默认路径为${ROCKET_HOME}/store/config/topic.json
+        // 主题存储信息：是否顺序消息、权限码、读队列数量、写队列数量、主题名称、topic flag、主题过滤方式
         TopicConfig topicConfig =
             this.brokerController.getTopicConfigManager().selectTopicConfig(requestHeader.getTopic());
         if (null == topicConfig) {
@@ -519,7 +530,7 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
                 return response;
             }
         }
-
+        // 4、检查队列，如果队列不合法则返回错误码。
         int queueIdInt = requestHeader.getQueueId();
         int idValid = Math.max(topicConfig.getWriteQueueNums(), topicConfig.getReadQueueNums());
         if (queueIdInt >= idValid) {

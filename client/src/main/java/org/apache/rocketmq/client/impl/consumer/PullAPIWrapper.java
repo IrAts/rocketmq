@@ -72,7 +72,7 @@ public class PullAPIWrapper {
     }
 
     /**
-     * 解码消息，并过滤消息
+     * 解码解压消息，并过滤消息
      *
      * @param mq
      * @param pullResult
