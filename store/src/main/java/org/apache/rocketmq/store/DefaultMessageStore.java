@@ -106,7 +106,7 @@ public class DefaultMessageStore implements MessageStore {
      */
     private final CommitLog commitLog;
     /**
-     * 消息队列存储缓存表
+     * 消息队列存储缓存表，按消息主题分组
      */
     // ConcurrentMap<String/* topic */, ConcurrentMap<Integer/* queueId */, ConsumeQueueInterface>> consumeQueueTable;
     private final ConsumeQueueStore consumeQueueStore;
@@ -119,13 +119,13 @@ public class DefaultMessageStore implements MessageStore {
      */
     private final CleanCommitLogService cleanCommitLogService;
     /**
-     * 清除 ComsumeQueue 文件服务
+     * 清除 ConsumeQueue 文件服务
      */
     private final CleanConsumeQueueService cleanConsumeQueueService;
 
     private final CorrectLogicOffsetService correctLogicOffsetService;
     /**
-     * 索引文件实现类
+     * Index 文件实现类
      */
     private final IndexService indexService;
     /**

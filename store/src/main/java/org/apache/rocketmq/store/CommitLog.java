@@ -805,6 +805,7 @@ public class CommitLog implements Swappable {
         String topicQueueKey = generateKey(putMessageThreadLocal.getKeyBuilder(), msg);
         long elapsedTimeInLock = 0;
         MappedFile unlockMappedFile = null;
+        // 获取最后一个 Mapped File，也就是当前的最后一个 commitLog 文件
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
 
         long currOffset;
@@ -856,6 +857,7 @@ public class CommitLog implements Swappable {
             msg.setEncodedBuff(putMessageThreadLocal.getEncoder().getEncoderBuffer());
             PutMessageContext putMessageContext = new PutMessageContext(topicQueueKey);
 
+            // 向 commitLog 写入消息前需要获取锁
             putMessageLock.lock(); //spin or ReentrantLock ,depending on store config
             try {
                 long beginLockTimestamp = this.defaultMessageStore.getSystemClock().now();
@@ -867,6 +869,8 @@ public class CommitLog implements Swappable {
                     msg.setStoreTimestamp(beginLockTimestamp);
                 }
 
+                // mappedFile == null 代表 ${ROCKET_HOME}/store/commitlog 下不存在任何文件，也就是此时是第一次接收消息，需要创建新的。
+                // mappedFile.isFull 表示当前文件满了，需要创建新的。
                 if (null == mappedFile || mappedFile.isFull()) {
                     mappedFile = this.mappedFileQueue.getLastMappedFile(0); // Mark: NewFile may be cause noise
                 }
@@ -876,6 +880,7 @@ public class CommitLog implements Swappable {
                     return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.CREATE_MAPPED_FILE_FAILED, null));
                 }
 
+                // 存储消息到 mappedFile 中。
                 result = mappedFile.appendMessage(msg, this.appendMessageCallback, putMessageContext);
                 switch (result.getStatus()) {
                     case PUT_OK:
@@ -1668,6 +1673,16 @@ public class CommitLog implements Swappable {
             this.msgStoreItemMemory = ByteBuffer.allocate(END_FILE_MIN_BLANK_LENGTH);
         }
 
+        /**
+         *
+         *
+         * @param fileFromOffset commitLog的文件名所表示的偏移量。
+         * @param byteBuffer 缓冲区
+         * @param maxBlank byteBuffer 剩余可以写入的最大空间
+         * @param msgInner 消息
+         * @param putMessageContext
+         * @return
+         */
         public AppendMessageResult doAppend(final long fileFromOffset, final ByteBuffer byteBuffer, final int maxBlank,
             final MessageExtBrokerInner msgInner, PutMessageContext putMessageContext) {
             // STORETIMESTAMP + STOREHOSTADDRESS + OFFSET <br>
@@ -1675,6 +1690,9 @@ public class CommitLog implements Swappable {
             // PHY OFFSET
             long wroteOffset = fileFromOffset + byteBuffer.position();
 
+            // 创建全局唯一消息 ID。
+            // 如果存储方为 IPV4，则消息 ID 有 16 字节：4IP+4端口号+8消息偏移量
+            // 如果存储方为 IPV6，则消息 ID 有 28 字节，16IP+4端口+8消息偏移量
             Supplier<String> msgIdSupplier = () -> {
                 int sysflag = msgInner.getSysFlag();
                 int msgIdLen = (sysflag & MessageSysFlag.STOREHOSTADDRESS_V6_FLAG) == 0 ? 4 + 4 + 8 : 16 + 4 + 8;
@@ -1761,6 +1779,9 @@ public class CommitLog implements Swappable {
             final long beginTimeMills = CommitLog.this.defaultMessageStore.now();
             ByteBuffer messagesByteBuff = messageExtBatch.getEncodedBuff();
 
+            // 创建全局唯一消息 ID。
+            // 如果存储方为 IPV4，则消息 ID 有 16 字节：4IP+4端口号+8消息偏移量
+            // 如果存储方为 IPV6，则消息 ID 有 28 字节，16IP+4端口+8消息偏移量
             int sysFlag = messageExtBatch.getSysFlag();
             int bornHostLength = (sysFlag & MessageSysFlag.BORNHOST_V6_FLAG) == 0 ? 4 + 4 : 16 + 4;
             int storeHostLength = (sysFlag & MessageSysFlag.STOREHOSTADDRESS_V6_FLAG) == 0 ? 4 + 4 : 16 + 4;

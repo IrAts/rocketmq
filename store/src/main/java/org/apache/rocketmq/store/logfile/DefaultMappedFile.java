@@ -192,8 +192,12 @@ public class DefaultMappedFile extends AbstractMappedFile {
         assert messageExt != null;
         assert cb != null;
 
+        // 1、首先获取 MappedFile 当前的写指针
         int currentPos = this.wrotePosition.get();
 
+        // 2、如果 currentPos 大于或等于文件大小就表明文件写满了，返回 AppendMessageStatus.UNKNOWN_ERROR 结果。
+        // 否则通过 slice() 方法创建一个与原 ByteBuffer 共享的内存区，且拥有独立的 position、limit 等指针，并设置
+        // position 为当前写指针。
         if (currentPos < this.fileSize) {
             ByteBuffer byteBuffer = appendMessageBuffer().slice();
             byteBuffer.position(currentPos);
