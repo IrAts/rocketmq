@@ -36,19 +36,47 @@ import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.logfile.DefaultMappedFile;
 import org.apache.rocketmq.store.logfile.MappedFile;
 
+/**
+ * RocketMQ 通过使用内存映射文件来提高I/O访问性能，
+ * 无论是 CommitLog、ConsumeQueue 还是 Index，
+ * 单个文件都被设计成固定长度，一个文件写满以后在创建
+ * 新的文件，文件名就为该文件第一条消息对应的全局偏移量。
+ *
+ * RocketMQ 使用 MappedFile、MappedFileQueue 来封装存储文件。MappedFileQueue 是 MappedFile 的管理容器，MappedFileQueue
+ * 对存储目录进行封装，例如 CommitLog 文件的存储路径为 ${ROCKETMQ_HOME}/store/commitlog，该目录下会存在多个映射文件 MappedFile。
+ *
+ */
 public class MappedFileQueue implements Swappable {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
     private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
 
+    /**
+     * 存储目录
+     */
     protected final String storePath;
 
+    /**
+     * 单个文件的存储大小
+     */
     protected final int mappedFileSize;
 
+    /**
+     * MappedFile 集合
+     */
     protected final CopyOnWriteArrayList<MappedFile> mappedFiles = new CopyOnWriteArrayList<MappedFile>();
 
+    /**
+     * 创建 MappedFile 服务类
+     */
     protected final AllocateMappedFileService allocateMappedFileService;
 
+    /**
+     * 当前刷盘指针
+     */
     protected long flushedWhere = 0;
+    /**
+     * 当前数据提交指针，内存中 ByteBuffer 当前写的写指针，该值大于、等于 flushedWhere。
+     */
     protected long committedWhere = 0;
 
     protected volatile long storeTimestamp = 0;
@@ -79,6 +107,11 @@ public class MappedFileQueue implements Swappable {
         }
     }
 
+    /**
+     * 根据消息存储时间戳查找 MappedFile。从 MappedFile 列表中第一个文件开始查找，
+     * 找到第一个最后一次更新时间大于待查找时间错的文件，如果不存在则返回最后一个。
+     *
+     */
     public MappedFile getMappedFileByTime(final long timestamp) {
         Object[] mfs = this.copyMappedFiles(0);
 
@@ -294,6 +327,10 @@ public class MappedFileQueue implements Swappable {
         return true;
     }
 
+    /**
+     * 获取存储文件最小偏移量。从这里可出，并不是直接返回 0，
+     * 而是返回第一个 MappedFile 的 getFileFromOffset() 方法。
+     */
     public long getMinOffset() {
 
         if (!this.mappedFiles.isEmpty()) {
@@ -308,6 +345,10 @@ public class MappedFileQueue implements Swappable {
         return -1;
     }
 
+    /**
+     * 获取存储文件的最大偏移量。
+     * 返回最后一个 MappedFile 的 fileFromOffset + 该 MappedFile 当前的读指针位置。
+     */
     public long getMaxOffset() {
         MappedFile mappedFile = getLastMappedFile();
         if (mappedFile != null) {
@@ -316,6 +357,9 @@ public class MappedFileQueue implements Swappable {
         return 0;
     }
 
+    /**
+     * 返回存储文件当前的写指针。返回嘴壶一个文件的 fileFromOffset + 该 MappedFile 文件的写指针位置。
+     */
     public long getMaxWrotePosition() {
         MappedFile mappedFile = getLastMappedFile();
         if (mappedFile != null) {
@@ -528,7 +572,14 @@ public class MappedFileQueue implements Swappable {
     }
 
     /**
-     * Finds a mapped file by offset.
+     * 根据消息偏移量 offset 查找 MappedFile，但是不能直接使用 offset%mappedFileSize。
+     * 这是因为使用了内存映射，只要是存在于存储目录下的文件都需要对应创建内存映射文件，如果不
+     * 定时将已消费的消息从存储文件中删除，会造成极大地内存压力与资源浪费，所以 RocketMQ 采
+     * 取定时删除存储文件的策略。也就是说在存储文件中，第一个问价不一定是 0000000000000000，
+     * 因为该文件在某一时刻会被删除，所以根据 offset 定位 MappedFile 的算法为：
+     * int index = (int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize));
+     *
+     * 如果传入的 offset 所在的文件已经被删除了，那么就返回 null。
      *
      * @param offset Offset.
      * @param returnFirstOnNotFound If the mapped file is not found, then return the first one.

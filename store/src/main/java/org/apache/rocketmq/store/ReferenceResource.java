@@ -41,6 +41,10 @@ public abstract class ReferenceResource {
     }
 
     public void shutdown(final long intervalForcibly) {
+        // 初次调用时 this.available 为 true，设置 available 为 false，并设置初次关闭时间戳。
+        // 调用 release() 方法尝试释放资源，release 只有在引用次数小于 1 时才会释放资源。
+        // 如果引用次数大于 0，对比当前时间与 firstShutdownTimestamp，如果已经超过了其最大拒绝存活期，
+        // 则每执行一次shutdown操作，引用数减少10000，直到引用数小于0时才才通过执行 release() 方法释放资源。
         if (this.available) {
             this.available = false;
             this.firstShutdownTimestamp = System.currentTimeMillis();
@@ -53,6 +57,10 @@ public abstract class ReferenceResource {
         }
     }
 
+    /**
+     * 将引用次数减1，如果引用次数小于、等于0，
+     * 执行 cleanup() 方法尝试释放 MappedByteBuffer 资源。
+     */
     public void release() {
         long value = this.refCount.decrementAndGet();
         if (value > 0)

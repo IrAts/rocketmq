@@ -57,6 +57,24 @@ import org.apache.rocketmq.store.logfile.MappedFile;
 import org.apache.rocketmq.common.attribute.CQType;
 
 /**
+ * RocketMQ 存储路径为 ${ROCKETMQ_HOME}/store，主要存储文件如下：
+ *  1、commitlog(dir) 消息存储目录
+ *  2、config(dir) 运行期间的有一些配置信息，包含：
+ *      consumerFilter.json 主题消息过滤信息
+ *      consumerOffset.json 集群消费模式下的消息消费进度
+ *      delayOffset.json 演示消息队列拉区进度
+ *      subscriptionGroup.json 消息消费组的配置信息
+ *      topics.json topic配置属性
+ *  3、consumequeue(dir) 消息消费队列存储目录
+ *  4、index(dir) 消息索引文件存储目录
+ *  5、abort(file) 如果存在abort文件，说明Broker非正常关闭，该文件默认在启动Broker时创建，在正常退出前删除。
+ *  6、checkpoint(file) 检查点文件，存储CommitLog文件最后一次刷盘时间戳、ConsumeQueue最后一次算盘时间、index文件最后一次刷盘时间戳。
+ *
+ * CommitLog 文件存储格式中前 4 字节存储该消息的总长度。
+ * CommitLog 文件的默认存储目录：${ROCKETMQ_HOME}/store/commitlog，可通过在 broker 配置文件中设置 storePathRootDir 改变。
+ * CommitLog 文件的默认大小为 1GB，可通过在 broker 配置文件中设置 mapedFileSizeCommitLog 来改变。
+ *
+ *
  * Store all metadata downtime for recovery, data protection reliability
  */
 public class CommitLog implements Swappable {
@@ -1188,6 +1206,11 @@ public class CommitLog implements Swappable {
         return -1;
     }
 
+    /**
+     * 获取当前 commitLog 目录的最小偏移量，首先获取目录下的第一个文件。
+     * 如果该文件可用，则返回该文件的起始偏移量。
+     * 否则返回下一个文件的起始偏移量。
+     */
     public long getMinOffset() {
         MappedFile mappedFile = this.mappedFileQueue.getFirstMappedFile();
         if (mappedFile != null) {
@@ -1201,6 +1224,16 @@ public class CommitLog implements Swappable {
         return -1;
     }
 
+    /**
+     * 根据偏移量与消息长度查找消息。首先根据偏移找到文件所在的物理偏移量，
+     * 然后用 offset 与文件长度取余，得到在文件内的偏移量，从该偏移量读取
+     * size 长度的内容并返回。如果只根据消息偏移量查找消息，则首先找找到文
+     * 件内的偏移量，然后尝试读取4字节，获取消息的实际长度，最后读取指定字节。
+     *
+     * @param offset
+     * @param size
+     * @return
+     */
     public SelectMappedBufferResult getMessage(final long offset, final int size) {
         int mappedFileSize = this.defaultMessageStore.getMessageStoreConfig().getMappedFileSizeCommitLog();
         MappedFile mappedFile = this.mappedFileQueue.findMappedFileByOffset(offset, offset == 0);
@@ -1211,6 +1244,10 @@ public class CommitLog implements Swappable {
         return null;
     }
 
+    /**
+     * 根据 offset 返回下一个文件的起始偏移量。
+     * offset + mappedFileSize - offset % mappedFileSize;
+     */
     public long rollNextFile(final long offset) {
         int mappedFileSize = this.defaultMessageStore.getMessageStoreConfig().getMappedFileSizeCommitLog();
         return offset + mappedFileSize - offset % mappedFileSize;

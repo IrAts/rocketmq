@@ -31,6 +31,16 @@ import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 
+/**
+ * RocketMQ 通过使用内存映射文件来提高I/O访问性能，
+ * 无论是 CommitLog、ConsumeQueue 还是 Index，
+ * 单个文件都被设计成固定长度，一个文件写满以后在创建
+ * 新的文件，文件名就为该文件第一条消息对应的全局偏移量。
+ *
+ * RocketMQ 使用 MappedFile、MappedFileQueue 来封装存储文件。MappedFileQueue 是 MappedFile 的管理容器，MappedFileQueue
+ * 对存储目录进行封装，例如 CommitLog 文件的存储路径为 ${ROCKETMQ_HOME}/store/commitlog，该目录下会存在多个映射文件 MappedFile。
+ *
+ */
 public interface MappedFile {
     /**
      * Returns the file name of the {@code MappedFile}.

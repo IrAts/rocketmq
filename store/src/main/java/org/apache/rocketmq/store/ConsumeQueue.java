@@ -41,6 +41,22 @@ import org.apache.rocketmq.store.queue.FileQueueLifeCycle;
 import org.apache.rocketmq.store.queue.QueueOffsetAssigner;
 import org.apache.rocketmq.store.queue.ReferredIterator;
 
+/**
+ * RocketMQ 基于主题订阅模式实现消息消费，消费者关心的是一个主题下的所有消息，但同一主体的消息是不连续地存储在 CommitLog 文件中的。
+ * 如果消息消费者直接从消息存储文件中遍历查找订阅主题下的消息，效率将极其低下。RocketMQ 为了适应消息消费的检索需求，设计了 ConsumeQueue
+ * 文件，该文件可以看做 CommitLog 关于消息消费的 "索引"文件，ConsumeQueue 的第一级目录为消息主题，第二级目录为主题的消息队列。
+ *      %{ROCKETMQ_HOME}/store/consumequeue/${topic_1}/0
+ *      %{ROCKETMQ_HOME}/store/consumequeue/${topic_1}/1
+ *      %{ROCKETMQ_HOME}/store/consumequeue/${topic_1}/2
+ *
+ * 为了加速 ConsumeQueue 消息条目的检索速度并节省磁盘空间，每一个 ConsumeQueue 条目不会存储消息的全量信息，存储格式：
+ *      CommitLog偏移量 | 消息大小 | tag哈希吗
+ *           8字节         4字节      8字节
+ * 单个 ConsumeQueue 文件中默认包含 30 万个条目。单个 ConsumeQueue 文件可以看做一个数组，其下标为 ConsumeQueue 的逻辑偏移量，
+ * 消息消费进度存储的偏移量即逻辑偏移量。ConsumeQueue 即为 CommitLog 文件的索引文件，其构建机制是当消息到达 CommitLog 文件后，由
+ * 专门的线程产生消息转发任务，从而构建 ConsumeQueue 文件与 Index 文件。
+ *
+ */
 public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
@@ -179,6 +195,16 @@ public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
         return totalSize;
     }
 
+    /**
+     * 1、根据时间戳定位到物理文件，就是从第一个文件开始，找到第一个文件更新时间大于该时间戳的文件。
+     * 2、采用二分法查找来加速检索。首先计算最低查找偏移量，取消息队列最小偏移量与该文件最小偏移量
+     * 的差为最小偏移量 low。获取当前存储文件中有效的最小物理偏移量 minPhysicOffset，如果查找
+     * 到的消息偏移量小于该物理偏移量，则结束该查找过程。
+     * 3、
+     *
+     * @param timestamp timestamp
+     * @return
+     */
     @Override
     public long getOffsetInQueueByTime(final long timestamp) {
         MappedFile mappedFile = this.mappedFileQueue.getMappedFileByTime(timestamp);
@@ -655,6 +681,14 @@ public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
         }
     }
 
+    /**
+     * 根据 startIndex 获取消息消费队列条目。通过 startIndex * 20 得到在 ConsumeQueue 文件的物理偏移量，
+     * 如果该偏移量小于 minLogicOffset，则返回 null，说明该消息已被删除，如果大于 minLogicOffset，则根据
+     * 偏移量定位到具体的物理文件。通过将偏移量与物理文件的大小取模获取在该文件的偏移量，从偏移量开始连续读取20
+     * 字节即可。
+     * ConsumeQueue 文件提供了根据消息存储时间来查找，具体实现的算法 getOffsetInQueueByTime(long timestamp)。
+     *
+     */
     private SelectMappedBufferResult getIndexBuffer(final long startIndex) {
         int mappedFileSize = this.mappedFileSize;
         long offset = startIndex * CQ_STORE_UNIT_SIZE;
