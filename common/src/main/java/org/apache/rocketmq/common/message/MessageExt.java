@@ -33,6 +33,10 @@ public class MessageExt extends Message {
 
     private int storeSize;
 
+    /**
+     * 该消息在 consumeQueue 的偏移量。
+     * 注意：不是在 commitLog 中的偏移量。
+     */
     private long queueOffset;
     private int sysFlag;
     private long bornTimestamp;

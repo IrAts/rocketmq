@@ -22,7 +22,14 @@ import java.util.function.Supplier;
  * When write a message to the commit log, returns results
  */
 public class AppendMessageResult {
-    // Return code
+    /**
+     * 消息追加结果。
+     * PUT_OK:消息追加成功
+     * END_OF_FILE:超过文件大小
+     * MESSAGE_SIZE_EXCEEDED:消息长度超过最大允许长度
+     * PROPERTIES_SIZE_EXCEEDED:属性长度超过最大允许长度
+     * UNKNOWN_ERROR:未知异常
+     */
     private AppendMessageStatus status;
     // Where to start writing
     private long wroteOffset;

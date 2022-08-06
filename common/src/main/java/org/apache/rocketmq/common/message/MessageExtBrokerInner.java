@@ -25,6 +25,9 @@ public class MessageExtBrokerInner extends MessageExt {
     private String propertiesString;
     private long tagsCode;
 
+    /**
+     * 这是 msg 按存储格式转换成的玩意。
+     */
     private ByteBuffer encodedBuff;
 
     public ByteBuffer getEncodedBuff() {

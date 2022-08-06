@@ -546,23 +546,23 @@ public class CommitLog implements Swappable {
     protected static int calMsgLength(int sysFlag, int bodyLength, int topicLength, int propertiesLength) {
         int bornhostLength = (sysFlag & MessageSysFlag.BORNHOST_V6_FLAG) == 0 ? 8 : 20;
         int storehostAddressLength = (sysFlag & MessageSysFlag.STOREHOSTADDRESS_V6_FLAG) == 0 ? 8 : 20;
-        final int msgLen = 4 //TOTALSIZE
-            + 4 //MAGICCODE
-            + 4 //BODYCRC
-            + 4 //QUEUEID
-            + 4 //FLAG
-            + 8 //QUEUEOFFSET
-            + 8 //PHYSICALOFFSET
-            + 4 //SYSFLAG
-            + 8 //BORNTIMESTAMP
-            + bornhostLength //BORNHOST
-            + 8 //STORETIMESTAMP
-            + storehostAddressLength //STOREHOSTADDRESS
-            + 4 //RECONSUMETIMES
-            + 8 //Prepared Transaction Offset
-            + 4 + (bodyLength > 0 ? bodyLength : 0) //BODY
-            + 1 + topicLength //TOPIC
-            + 2 + (propertiesLength > 0 ? propertiesLength : 0) //propertiesLength
+        final int msgLen = 4 //TOTALSIZE 总长度
+            + 4 //MAGICCODE 魔数
+            + 4 //BODYCRC 消息体 crc 校验码
+            + 4 //QUEUEID 消息消费队列ID
+            + 4 //FLAG 消息标记，RocketMQ对其不作处理，供应用程序使用
+            + 8 //QUEUEOFFSET 消息在 consumeQueue 的物理偏移量
+            + 8 //PHYSICALOFFSET 消息在 commitLog 的物理偏移量
+            + 4 //SYSFLAG 系统标志
+            + 8 //BORNTIMESTAMP 消息生产者调用消息发送API时的时间戳
+            + bornhostLength //BORNHOST 消息发送者IP
+            + 8 //STORETIMESTAMP 消息存储时间戳
+            + storehostAddressLength //STOREHOSTADDRESS broker服务器IP+端口号
+            + 4 //RECONSUMETIMES 消息重试次数
+            + 8 //Prepared Transaction Offset 事务消息的物理偏移量
+            + 4 + (bodyLength > 0 ? bodyLength : 0) //BODY 消息体长度
+            + 1 + topicLength //TOPIC topic长度
+            + 2 + (propertiesLength > 0 ? propertiesLength : 0) //propertiesLength 消息属性长度，2字节，即消息属性长度不能超过过65535
             + 0;
         return msgLen;
     }
@@ -790,11 +790,12 @@ public class CommitLog implements Swappable {
 
         String topic = msg.getTopic();
 
+        // 根据消息的来源地址的IP协议版本设置标志位。
         InetSocketAddress bornSocketAddress = (InetSocketAddress) msg.getBornHost();
         if (bornSocketAddress.getAddress() instanceof Inet6Address) {
             msg.setBornHostV6Flag();
         }
-
+        // 根据存储消息的broker的IP协议版本设置标志位
         InetSocketAddress storeSocketAddress = (InetSocketAddress) msg.getStoreHost();
         if (storeSocketAddress.getAddress() instanceof Inet6Address) {
             msg.setStoreHostAddressV6Flag();
@@ -802,12 +803,14 @@ public class CommitLog implements Swappable {
 
         PutMessageThreadLocal putMessageThreadLocal = this.putMessageThreadLocal.get();
         updateMaxMessageSize(putMessageThreadLocal);
+        // 生成key："topic-queueId"
         String topicQueueKey = generateKey(putMessageThreadLocal.getKeyBuilder(), msg);
         long elapsedTimeInLock = 0;
         MappedFile unlockMappedFile = null;
         // 获取最后一个 Mapped File，也就是当前的最后一个 commitLog 文件
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
 
+        // 计算逻辑偏移量（一个commitLog文件1G，逻辑偏移量就是能大于1G的那个）
         long currOffset;
         if (mappedFile == null) {
             currOffset = 0;
@@ -815,6 +818,7 @@ public class CommitLog implements Swappable {
             currOffset = mappedFile.getFileFromOffset() + mappedFile.getWrotePosition();
         }
 
+        // 准备数据，如果需要进行多机数据冗余的话就会使用。
         int needAckNums = this.defaultMessageStore.getMessageStoreConfig().getInSyncReplicas();
         boolean needHandleHA = needHandleHA(msg);
 
@@ -823,7 +827,6 @@ public class CommitLog implements Swappable {
             if (this.defaultMessageStore.getHaService().inSyncReplicasNums(currOffset) < this.defaultMessageStore.getMessageStoreConfig().getMinInSyncReplicas()) {
                 return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.IN_SYNC_REPLICAS_NOT_ENOUGH, null));
             }
-            //
             if (this.defaultMessageStore.getMessageStoreConfig().isAllAckInSyncStateSet()) {
                 // -1 means all ack in SyncStateSet
                 needAckNums = MixAll.ALL_ACK_IN_SYNC_STATE_SET;
@@ -838,22 +841,31 @@ public class CommitLog implements Swappable {
             }
         }
 
+        // 以 "topic-queueId" 为粒度进行锁操作，尽可能提高并发。
         topicQueueLock.lock(topicQueueKey);
         try {
 
+            // 为该消息在 consumeQueue 中分配存储的空间（20字节=8commitLog偏移量+4大小+tag哈希吗）并返回偏移量设置到 msg 中。
+            // 注意是 consumeQueue 而不是 commitLog。
+            // 当然当前 broker 是 slave 的话，那么就不需要执行分配操作。
             boolean needAssignOffset = true;
             if (defaultMessageStore.getMessageStoreConfig().isDuplicationEnable()
                 && defaultMessageStore.getMessageStoreConfig().getBrokerRole() != BrokerRole.SLAVE) {
                 needAssignOffset = false;
             }
             if (needAssignOffset) {
+                // 在 consumeQueue 中分配存储的空间，并将偏移量设置到 msg 中。
+                // 每个 Queue 的下一个分配偏移量都会在一个 Map topicQueueTable 记着，这需要使用key："topic-queueId" 就能获取到。
                 defaultMessageStore.assignOffset(msg, getMessageNum(msg));
             }
 
+            // 将 msg 转化为 ByteBuf 并存在 putMessageThreadLocal.getEncoder() 获取到的实体中。
+            // 返回值如果不为空则表示转化失败。注意：此时 ByteBuf 中该消息存储的 commitLogOffset 无需设置。
             PutMessageResult encodeResult = putMessageThreadLocal.getEncoder().encode(msg);
             if (encodeResult != null) {
                 return CompletableFuture.completedFuture(encodeResult);
             }
+            // 这里将上面 msg 转化成的 ByteBuf 转换为 ByteBuffer 并拿出来，并设置到 setEncodedBuff 中。
             msg.setEncodedBuff(putMessageThreadLocal.getEncoder().getEncoderBuffer());
             PutMessageContext putMessageContext = new PutMessageContext(topicQueueKey);
 
@@ -863,8 +875,7 @@ public class CommitLog implements Swappable {
                 long beginLockTimestamp = this.defaultMessageStore.getSystemClock().now();
                 this.beginTimeInLock = beginLockTimestamp;
 
-                // Here settings are stored timestamp, in order to ensure an orderly
-                // global
+                // Here settings are stored timestamp, in order to ensure an orderly global
                 if (!defaultMessageStore.getMessageStoreConfig().isDuplicationEnable()) {
                     msg.setStoreTimestamp(beginLockTimestamp);
                 }
@@ -914,6 +925,7 @@ public class CommitLog implements Swappable {
                         return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.UNKNOWN_ERROR, result));
                 }
 
+                // 计算锁定时间
                 elapsedTimeInLock = this.defaultMessageStore.getSystemClock().now() - beginLockTimestamp;
                 beginTimeInLock = 0;
             } finally {
@@ -1745,9 +1757,11 @@ public class CommitLog implements Swappable {
 
             int pos = 4 + 4 + 4 + 4 + 4;
             // 6 QUEUEOFFSET
+            // 设置消息在 consumeQueue 的物理偏移量
             preEncodeBuffer.putLong(pos, queueOffset);
             pos += 8;
             // 7 PHYSICALOFFSET
+            // 设置消息在 commitLog 的物理偏移量。
             preEncodeBuffer.putLong(pos, fileFromOffset + byteBuffer.position());
             int ipLen = (msgInner.getSysFlag() & MessageSysFlag.BORNHOST_V6_FLAG) == 0 ? 4 + 4 : 16 + 4;
             // 8 SYSFLAG, 9 BORNTIMESTAMP, 10 BORNHOST, 11 STORETIMESTAMP
@@ -1758,6 +1772,7 @@ public class CommitLog implements Swappable {
             final long beginTimeMills = CommitLog.this.defaultMessageStore.now();
             CommitLog.this.getMessageStore().getPerfCounter().startTick("WRITE_MEMORY_TIME_MS");
             // Write messages to the queue buffer
+            // 将消息写入 byteBuffer 即可。因为 byteBuffer 就是通过内存映射 commitLog 搞出来的。
             byteBuffer.put(preEncodeBuffer);
             CommitLog.this.getMessageStore().getPerfCounter().endTick("WRITE_MEMORY_TIME_MS");
             msgInner.setEncodedBuff(null);
@@ -1894,6 +1909,7 @@ public class CommitLog implements Swappable {
 
             final int bodyLength = msgInner.getBody() == null ? 0 : msgInner.getBody().length;
 
+            // 根据消息体、主题和属性的长度，结合消息存储格式，计算消息的总长度。
             final int msgLen = calMsgLength(msgInner.getSysFlag(), bodyLength, topicLength, propertiesLength);
 
             // Exceeds the maximum message body
