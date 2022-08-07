@@ -200,7 +200,7 @@ public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
      * 2、采用二分法查找来加速检索。首先计算最低查找偏移量，取消息队列最小偏移量与该文件最小偏移量
      * 的差为最小偏移量 low。获取当前存储文件中有效的最小物理偏移量 minPhysicOffset，如果查找
      * 到的消息偏移量小于该物理偏移量，则结束该查找过程。
-     * 3、
+     * 3、如果根据 timestamp 找不到对应的消息，则返回最接近 timestamp 时间的消息。
      *
      * @param timestamp timestamp
      * @return
@@ -225,6 +225,7 @@ public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
                         byteBuffer.position(midOffset);
                         long phyOffset = byteBuffer.getLong();
                         int size = byteBuffer.getInt();
+                        // 如果找出来的偏移量小于当前所存储的最小偏移量，说明目标必然在比 midOffset 大的位置。
                         if (phyOffset < minPhysicOffset) {
                             low = midOffset + CQ_STORE_UNIT_SIZE;
                             leftOffset = midOffset;
@@ -233,9 +234,9 @@ public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
 
                         long storeTime =
                             this.messageStore.getCommitLog().pickupStoreTimestamp(phyOffset, size);
-                        if (storeTime < 0) {
+                        if (storeTime < 0) { // 无效消息
                             return 0;
-                        } else if (storeTime == timestamp) {
+                        } else if (storeTime == timestamp) { // 找到目标
                             targetOffset = midOffset;
                             break;
                         } else if (storeTime > timestamp) {
@@ -249,6 +250,7 @@ public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
                         }
                     }
 
+                    // 找不到满足条件的偏移量
                     if (targetOffset != -1) {
 
                         offset = targetOffset;
@@ -842,6 +844,12 @@ public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
         this.minLogicOffset = minLogicOffset;
     }
 
+    /**
+     * 获取 nextBeginOffset 所在文件的下一个文件的第一个 ConsumeQueue Entry 的逻辑偏移量。
+     *
+     * @param nextBeginOffset next begin offset
+     * @return
+     */
     @Override
     public long rollNextFile(final long nextBeginOffset) {
         int mappedFileSize = this.mappedFileSize;

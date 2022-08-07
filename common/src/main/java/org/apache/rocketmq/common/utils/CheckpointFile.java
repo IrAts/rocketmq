@@ -29,6 +29,15 @@ import org.apache.rocketmq.common.MixAll;
 import org.apache.rocketmq.common.UtilAll;
 
 /**
+ * Checkpoint 文件的作用是记录 CommitLog、ConsumeQueue、Index
+ * 文件的刷盘时间点，文件固定长度为 4KB，其中只用该文件前面的 24 字节。
+ * 文件的存储格式：
+ *  | physicMsgTimestamp | logicsMsgTimestamp | indexMsgTimestamp |
+ *          8 Byte               8 Byte              8 Byte
+ * physicMsgTimestamp：CommitLog 文件刷盘时间点
+ * logicsMsgTimestamp：ConsumeQueue 文件刷盘时间点
+ * indexMsgTimestamp：Index 文件刷盘时间点
+ *
  * Entry Checkpoint file util
  * Format:
  * <li>First line:  Entries size

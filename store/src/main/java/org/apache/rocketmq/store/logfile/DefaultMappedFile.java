@@ -90,7 +90,7 @@ public class DefaultMappedFile extends AbstractMappedFile {
      */
     protected ByteBuffer writeBuffer = null;
     /**
-     * 堆外内存池，该内存池中的内存会提供内存锁机制。transientSotrePoolEnable 为 true 时启用。
+     * 堆外内存池，该内存池中的内存会提供内存锁机制。transientStorePoolEnable 为 true 时启用。
      */
     protected TransientStorePool transientStorePool = null;
     /**
