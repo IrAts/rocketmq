@@ -375,6 +375,7 @@ public interface MessageStore {
     void cleanExpiredConsumerQueue();
 
     /**
+     * 检查给定的消息是否已从内存中换出。
      * Check if the given message has been swapped out of the memory.
      *
      * @param topic topic.
@@ -385,6 +386,7 @@ public interface MessageStore {
     boolean checkInDiskByConsumeOffset(final String topic, final int queueId, long consumeOffset);
 
     /**
+     * 获取已存储在提交日志中但尚未分派到消费队列的字节数。
      * Get number of the bytes that have been stored in commit log and not yet dispatched to consume queue.
      *
      * @return number of the bytes to dispatch.
@@ -428,6 +430,7 @@ public interface MessageStore {
     void setConfirmOffset(long phyOffset);
 
     /**
+     * 检查操作系统页面缓存是否繁忙。
      * Check if the operation system page cache is busy or not.
      *
      * @return true if the OS page cache is busy; false otherwise.
@@ -442,6 +445,7 @@ public interface MessageStore {
     long lockTimeMills();
 
     /**
+     * 检查临时存储池是否不足。
      * Check if the transient store pool is deficient.
      *
      * @return true if the transient store pool is running out; false otherwise.
