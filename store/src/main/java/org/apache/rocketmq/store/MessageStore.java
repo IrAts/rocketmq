@@ -379,7 +379,7 @@ public interface MessageStore {
      * Check if the given message has been swapped out of the memory.
      *
      * @param topic topic.
-     * @param queueId queue ID.
+     *
      * @param consumeOffset consume queue offset.
      * @return true if the message is no longer in memory; false otherwise.
      */
