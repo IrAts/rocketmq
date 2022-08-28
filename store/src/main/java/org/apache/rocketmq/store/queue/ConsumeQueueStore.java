@@ -92,7 +92,11 @@ public class ConsumeQueueStore {
     }
 
     public void putMessagePositionInfoWrapper(DispatchRequest dispatchRequest) {
+        // 1、根据消息主题于队列ID，先获取对应的ConsumeQueue文件，其逻辑比较简单，因为每一个消息主题对应一个ConsumeQueue 目录。
+        // 主题下每一个消息队列对应一个文件夹，所以取出该文件夹最后的 ConsumeQueue 文件即可。
         ConsumeQueueInterface cq = this.findOrCreateConsumeQueue(dispatchRequest.getTopic(), dispatchRequest.getQueueId());
+        // 2、一次将消息偏移量、消息长度、tag哈希码写入 ByteBuffer，并根据 consume-QueueOffset 计算 ConsumeQueue 中的物理地址，
+        // 将内容追加到 ConsumeQueue 的内存映射文件中，（本操作只追加，不刷盘），ConsumeQueue 的刷盘方式固定为异步刷盘。
         this.putMessagePositionInfoWrapper(cq, dispatchRequest);
     }
 

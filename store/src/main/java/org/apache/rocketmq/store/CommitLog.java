@@ -299,11 +299,13 @@ public class CommitLog implements Swappable {
     }
 
     /**
-     * When the normal exit, data recovery, all memory data have been flush
+     * Broker 正常退出时的文件恢复逻辑
      */
     public void recoverNormally(long maxPhyOffsetOfConsumeQueue) {
+        // checkCRCOnRecover 参数用于在进行文件恢复时查找消息是否验证CRC码。
         boolean checkCRCOnRecover = this.defaultMessageStore.getMessageStoreConfig().isCheckCRCOnRecover();
         boolean checkDupInfo = this.defaultMessageStore.getMessageStoreConfig().isDuplicationEnable();
+        // 1、Rroker正常停止再重启时，从倒数第3个文件开始恢复，如果不足3个文件，则从第一个文件开始恢复。
         final List<MappedFile> mappedFiles = this.mappedFileQueue.getMappedFiles();
         if (!mappedFiles.isEmpty()) {
             // Began to recover from the last third file
@@ -312,13 +314,22 @@ public class CommitLog implements Swappable {
                 index = 0;
             }
 
+
             MappedFile mappedFile = mappedFiles.get(index);
             ByteBuffer byteBuffer = mappedFile.sliceByteBuffer();
+            // processOffset 为 CommitLog 文件已确认的物理偏移量。等于mappedFile.getFileFromOffset加上mappedFileOffset
             long processOffset = mappedFile.getFileFromOffset();
+            // mappedFileOffset 为当前文件已校验通过的物理偏移量。
             long mappedFileOffset = 0;
             long lastValidMsgPhyOffset = this.getConfirmOffset();
             // normal recover doesn't require dispatching
             boolean doDispatch = false;
+            // 2、遍历CommitLog文件，每次取出一条消息，如果查找结果为true并且消息的
+            // 长度大于0，表示消息正确，mappedFileOffset指针向前移动本条消息的长度。
+            // 如果查找结果为true并且消息的长度等于0，表示已到该文件的末尾，如果还有下
+            // 一个文件，则重置processOffset、mappedFileOffset并重复上述步骤，否则
+            // 跳出循环；如果查找结果为false，表明该文件未填满所有消息，则跳出循环，结
+            // 束遍历文件。
             while (true) {
                 DispatchRequest dispatchRequest = this.checkMessageAndReturnSize(byteBuffer, checkCRCOnRecover, checkDupInfo);
                 int size = dispatchRequest.getMsgSize();
@@ -356,6 +367,7 @@ public class CommitLog implements Swappable {
                 }
             }
 
+            // 3、更新 MappedFileQueue 的 flushedWhere 和 committedPosition 指针。
             processOffset += mappedFileOffset;
             // Set a candidate confirm offset.
             // In most cases, this value will be overwritten by confirmLog.init.
@@ -363,6 +375,12 @@ public class CommitLog implements Swappable {
             this.setConfirmOffset(lastValidMsgPhyOffset);
             this.mappedFileQueue.setFlushedWhere(processOffset);
             this.mappedFileQueue.setCommittedWhere(processOffset);
+            // 4、删除processOffset之后的所有文件。遍历目录下的文件，如果文件的尾部偏移量小于offset则跳
+            // 过该文件，如果尾部的偏移量大于offset，则进一步比较offset与文件的开始偏移量。如果offset大
+            // 于文件的起始偏移量，说明当前文件包含了有效偏移量，设置MappedFile的flushedPosition和
+            // committedPosition。如果offset小于文件的起始偏移量，说明该文件是有效文件后面创建的，则调用
+            // MappedFile#destory方法释放MappedFile占用的内存资源（内存映射与内存通道等），然后加入待删
+            // 除文件列表中，最终调用deleteExpiredFile将文件从物理磁盘上删除。
             this.mappedFileQueue.truncateDirtyFiles(processOffset);
 
             // Clear ConsumeQueue redundant data
@@ -608,6 +626,14 @@ public class CommitLog implements Swappable {
         return -1;
     }
 
+    /**
+     * Broker 异常停止恢复逻辑。
+     * 异常文件恢复与正常停止文件恢复的步骤基本相同，主要差别有两个：首先，Broker正常停止默认从倒数
+     * 第三个文件开始恢复，而异常停止则需要从最后一个文件倒序推进，找到第一个消息存储正常的文件；其
+     * 次，如果CommitLog目录没有消息文件，在ConsuneQueue目录下存在的文件则需要销毁。
+     *
+     * @param maxPhyOffsetOfConsumeQueue
+     */
     @Deprecated
     public void recoverAbnormally(long maxPhyOffsetOfConsumeQueue) {
         // recover by the minimum time stamp
@@ -620,7 +646,12 @@ public class CommitLog implements Swappable {
             MappedFile mappedFile = null;
             for (; index >= 0; index--) {
                 mappedFile = mappedFiles.get(index);
+                // 判断一个消息文件是否正确。
                 if (this.isMappedFileMatchedRecover(mappedFile)) {
+                    // 如果找到MappedFile，则遍历MappedFile中的消息，验证消息的合法性，
+                    // 并将消息重新转发到ConsumeQueue与Index文件。
+                    // 如果未找到有效的MappedFile，则设置CommitLog目录的flushedWhere、
+                    // committedWhere指针都为0，并销毁ConsumeQueue文件。
                     log.info("recover from this mapped file " + mappedFile.getFileName());
                     break;
                 }
@@ -725,9 +756,13 @@ public class CommitLog implements Swappable {
         this.getMessageStore().onCommitLogAppend(msg, result, commitLogFile);
     }
 
+    /**
+     * 判断一个消息文件是否是正确的。
+     */
     private boolean isMappedFileMatchedRecover(final MappedFile mappedFile) {
         ByteBuffer byteBuffer = mappedFile.sliceByteBuffer();
 
+        // 1、判断文件的魔数，如果不是MESSAGE_MAGIC_CODE，则返回false，表示该文件不符合CommitLog文件的存储格式
         int magicCode = byteBuffer.getInt(MessageDecoder.MESSAGE_MAGIC_CODE_POSTION);
         if (magicCode != MESSAGE_MAGIC_CODE) {
             return false;
@@ -735,12 +770,18 @@ public class CommitLog implements Swappable {
 
         int sysFlag = byteBuffer.getInt(MessageDecoder.SYSFLAG_POSITION);
         int bornhostLength = (sysFlag & MessageSysFlag.BORNHOST_V6_FLAG) == 0 ? 8 : 20;
+        //2、如果文件中第一条消息的存储时间等于0，则返回false，说明该消息的存储文件中未存储任何消息
         int msgStoreTimePos = 4 + 4 + 4 + 4 + 4 + 8 + 8 + 4 + 8 + bornhostLength;
         long storeTimestamp = byteBuffer.getLong(msgStoreTimePos);
         if (0 == storeTimestamp) {
             return false;
         }
 
+        // 3、对比文件第一条消息的时间戳与检测点。如果文件第一条消息的时间戳小于文件检测点，
+        // 说明该文件的部分消息是可靠的，则从该文件开始恢复。checkpoint文件中保存了CommitLog、
+        // ConsumeQueue、Index的文件刷盘点，RocketMQ默认选择CommitLog文件与ConsumeQueue
+        // 这两个文件的刷盘点中较小值与CommitLog文件第一条消息的时间戳做对比，如果
+        // messageIndexEnable为true，表示Index文件的刷盘时间点也参与计算。
         if (this.defaultMessageStore.getMessageStoreConfig().isMessageIndexEnable()
             && this.defaultMessageStore.getMessageStoreConfig().isMessageIndexSafe()) {
             if (storeTimestamp <= this.defaultMessageStore.getStoreCheckpoint().getMinTimestampIndex()) {

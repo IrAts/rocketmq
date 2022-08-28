@@ -453,6 +453,13 @@ public class ConsumeQueue implements ConsumeQueueInterface, FileQueueLifeCycle {
         return this.minLogicOffset / CQ_STORE_UNIT_SIZE;
     }
 
+    /**
+     * 依次将消息偏移量、消息长度、tag哈希码写入 ByteBuffer，并根据consume-QueueOffset
+     * 计算ConsumeQueue 中的物理地址，将内容追加到 ConsumeQueue 的内存映射文件中（本操作
+     * 只追加，不刷盘），ConsumeQueue的刷盘方式固定为异步刷盘。
+     *
+     * @param request the request containing dispatch information.
+     */
     @Override
     public void putMessagePositionInfoWrapper(DispatchRequest request) {
         final int maxRetries = 30;

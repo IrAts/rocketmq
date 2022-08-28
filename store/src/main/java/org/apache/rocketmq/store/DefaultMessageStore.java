@@ -302,21 +302,37 @@ public class DefaultMessageStore implements MessageStore {
         boolean result = true;
 
         try {
+            // 1、判断上一次 Broker hi否正常退出。
             boolean lastExitOK = !this.isTempFileExist();
             LOGGER.info("last shutdown {}, root dir: {}", lastExitOK ? "normally" : "abnormally", messageStoreConfig.getStorePathRootDir());
 
-            // load Commit Log
+            // 2、加载 CommitLog 文件。
+            // 加载 ${ROCKET_HOME}/store/commitlog 目录下所有文件并按照文件
+            // 名进行排序。如果文件与配置文件的单个文件大小不一致，将忽略该目录下
+            // 的所有文件，然后创建 MappedFile 对象。注意 load() 方法将
+            // wrotePosition、flushedPosition、committedPosition三个指针
+            // 都设置为文件大小。
             result = result && this.commitLog.load();
 
-            // load Consume Queue
+            // 3、加载 ConsumeQueue 文件
+            // 调用 DefaultMessageStore#loadConsumeQueue，其思路与 CommitLog 大体一
+            // 致，遍历消息消费队列根目录，获取该 Broker 存储的所有主题，然后遍历每个主题目
+            // 录，获取该主题下的所有消息消费队列，最后分别加 载每个消息消费队列下的文件，构
+            // 建 ConsumeQueue 对象，主要初始化 ConsumeQueue 的 topic、queueId、
+            // storePath、mappedFileSize 属性。
             result = result && this.consumeQueueStore.load();
 
             if (result) {
+                // 3、加载并存储 checkpoint 文件，主要用于记录 CommitLog 文件、ConsumeQueue文件、Index文件的刷盘点，
                 this.storeCheckpoint =
                     new StoreCheckpoint(StorePathConfigHelper.getStoreCheckpoint(this.messageStoreConfig.getStorePathRootDir()));
                 this.masterFlushedOffset = this.storeCheckpoint.getMasterFlushedOffset();
+                // 4、加载Index文件，如果上次异常退出，而且Index文件刷盘时间小于该文件最大的消息时间戳，则该文件将立即销毁
                 this.indexService.load(lastExitOK);
 
+                // 5、根据Broker是否为正常停止，执行不同的恢复策。
+                // 恢复ConsumeQueue文件后，将在CommitLog实例中保存每个消息消费队列当前的存储
+                // 逻辑偏移量，这也是消息中不仅存储主题、消息队列ID还存储了消息队列偏移量的关键所在。
                 this.recover(lastExitOK);
 
                 LOGGER.info("load over, and the max phy offset = {}", this.getMaxPhyOffset());
@@ -1644,6 +1660,13 @@ public class DefaultMessageStore implements MessageStore {
         this.consumeQueueStore.checkSelf();
     }
 
+    /**
+     * 判断是否存在文件 ${ROCKETMQ_HOME}/store/abort 文件。
+     *
+     * RocketMq在启动时会创建 ${ROCKETMQ_HOME}/store/abort 文件，在退出时通过注册 JVM 钩子
+     * 函数删除该文件，如果下一次启动时存在该文件，就说明 Broker 是异常退出的，此时 CommitLog
+     * 与 ConsumeQueue 的数据有可能不一致，需要进行修复。
+     */
     private boolean isTempFileExist() {
         String fileName = StorePathConfigHelper.getAbortFile(this.messageStoreConfig.getStorePathRootDir());
         File file = new File(fileName);
@@ -1656,11 +1679,15 @@ public class DefaultMessageStore implements MessageStore {
         long recoverCqEnd = System.currentTimeMillis();
 
         if (lastExitOK) {
+            // Broker 正常停止恢复逻辑
             this.commitLog.recoverNormally(maxPhyOffsetOfConsumeQueue);
         } else {
+            // Broker 异常停止恢复逻辑
             this.commitLog.recoverAbnormally(maxPhyOffsetOfConsumeQueue);
         }
         long recoverClogEnd = System.currentTimeMillis();
+        // 恢复ConsumeQueue文件后，将在CommitLog实例中保存每个消息消费队列当前的存储
+        // 逻辑偏移量，这也是消息中不仅存储主题、消息队列ID还存储了消息队列偏移量的关键所在。
         this.recoverTopicQueueTable();
         long recoverOffsetEnd = System.currentTimeMillis();
 
@@ -1891,6 +1918,7 @@ public class DefaultMessageStore implements MessageStore {
 
         @Override
         public void dispatch(DispatchRequest request) {
+            // 仅当启动了索引服务时才除处理 DispatchRequest
             if (DefaultMessageStore.this.messageStoreConfig.isMessageIndexEnable()) {
                 DefaultMessageStore.this.indexService.buildIndex(request);
             }
@@ -2415,8 +2443,16 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * 因为 ConsumeQueue 文件、Index 文件都是基于 CommitLogg 文件构建的，
+     * 所以当消息生产者提交的消息存储到 CommitLog 文件中时，ConsumeQueue
+     * 文件、Index 文件需要及时更新，否则消息无法及时被消费。
+     */
     class ReputMessageService extends ServiceThread {
 
+        /**
+         * 指定从哪个偏移量开始将 commitLog 的消息推送到 ConsumeQueue 文件和 Index 文件。
+         */
         private volatile long reputFromOffset = 0;
 
         public long getReputFromOffset() {
@@ -2467,12 +2503,17 @@ public class DefaultMessageStore implements MessageStore {
             }
             for (boolean doNext = true; this.isCommitLogAvailable() && doNext; ) {
 
+                // 1、返回 reputFromOffset 偏移量开始的廍有效数据（CommitLog 文件），如果返回数据部位空，就循环读取每一条数据。
                 SelectMappedBufferResult result = DefaultMessageStore.this.commitLog.getData(reputFromOffset);
                 if (result != null) {
                     try {
                         this.reputFromOffset = result.getStartOffset();
 
+                        // 循环遍历从 reputFromOffset 返回的每一条消息
                         for (int readSize = 0; readSize < result.getSize() && reputFromOffset < DefaultMessageStore.this.getConfirmOffset() && doNext; ) {
+                            // 2、读取消息并创建 DispatchRequest 对象，将该分发对象分别分发到 ConsumeQueue 文件生成服务和 Index 文件生成服务
+                            // CommitLogDispatcherBuildConsumeQueue() - 构建消息消费队列
+                            // CommitLogDispatcherBuildIndex() - 构建索引文件
                             DispatchRequest dispatchRequest =
                                 DefaultMessageStore.this.commitLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false, false);
                             int size = dispatchRequest.getBufferSize() == -1 ? dispatchRequest.getMsgSize() : dispatchRequest.getBufferSize();
