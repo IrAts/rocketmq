@@ -617,6 +617,11 @@ public class DefaultMessageStore implements MessageStore {
         return waitForPutResult(asyncPutMessages(messageExtBatch));
     }
 
+    /**
+     * 同步等待消息刷盘操作的结果
+     * @param putMessageResultFuture 消息刷盘操作future
+     * @return 刷盘结果
+     */
     private PutMessageResult waitForPutResult(CompletableFuture<PutMessageResult> putMessageResultFuture) {
         try {
             int putMessageTimeout =

@@ -1205,6 +1205,13 @@ public class CommitLog implements Swappable {
         });
     }
 
+    /**
+     * 根据消息的请求存储方式（同步/异步）将消息刷盘
+     * 
+     * @param result 消息添加到CommitLog的结果，只是追加到CommitLog，并未刷破
+     * @param messageExt 消息体
+     * @return
+     */
     private CompletableFuture<PutMessageStatus> handleDiskFlush(AppendMessageResult result, MessageExt messageExt) {
         return this.flushManager.handleDiskFlush(result, messageExt);
     }
@@ -1501,8 +1508,10 @@ public class CommitLog implements Swappable {
     }
 
     public static class GroupCommitRequest {
+        // 刷盘点偏移量
         private final long nextOffset;
         // Indicate the GroupCommitRequest result: true or false
+        // 刷盘结果
         private final CompletableFuture<PutMessageStatus> flushOKFuture = new CompletableFuture<>();
         private volatile int ackNums = 1;
         private final long deadLine;
@@ -2262,9 +2271,11 @@ public class CommitLog implements Swappable {
             if (FlushDiskType.SYNC_FLUSH == CommitLog.this.defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
                 final GroupCommitService service = (GroupCommitService) this.flushCommitLogService;
                 if (messageExt.isWaitStoreMsgOK()) {
+                    // 1、构建GroupCommitRequest同步任务并提交到GroupCommitRequest。
                     GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes(), CommitLog.this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout());
                     flushDiskWatcher.add(request);
                     service.putRequest(request);
+                    // 2、返回刷盘请求的future。
                     return request.future();
                 } else {
                     service.wakeup();
