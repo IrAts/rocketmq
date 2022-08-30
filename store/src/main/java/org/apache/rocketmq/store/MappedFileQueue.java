@@ -386,6 +386,16 @@ public class MappedFileQueue implements Swappable {
         }
     }
 
+    /**
+     * 执行文件销毁与删除
+     *
+     * 从倒数第二个文件开始遍历，计算文件的最大存活时间，即文件的最
+     * 后一次更新时间+文件存活时间（默认72小时），如果当前时间大于
+     * 文件的最大存活时间或需要强制删除文件（当磁盘使用超过设定的阈
+     * 值）时，执行MappedFile#destory方法，清除MappedFile占有的
+     * 相关资源，如果执行成功，将该文件加入待删除文件列表中，最后统
+     * 一执行File#delete方法将文件从物理磁盘中删除。
+     */
     public int deleteExpiredFileByTime(final long expiredTime,
         final int deleteFilesInterval,
         final long intervalForcibly,
@@ -558,6 +568,15 @@ public class MappedFileQueue implements Swappable {
         return result;
     }
 
+    /**
+     * commit（提交操作）指的是将在开启 transientStorePollEnable 的情况下，
+     * 将数据从 transientStorePool 中转移到 MappedFile 的 fileChannel 中。
+     * 注意：
+     * 在开启 transientStorePollEnable 的情况下，向 MappedFile 写入数据会通过 fileChannel。
+     * 在关闭 transientStorePollEnable 的情况下，向 MappedFile 写入数据会通过 mmap.Buffer。
+     * @param commitLeastPages
+     * @return
+     */
     public synchronized boolean commit(final int commitLeastPages) {
         boolean result = true;
         MappedFile mappedFile = this.findMappedFileByOffset(this.committedWhere, this.committedWhere == 0);

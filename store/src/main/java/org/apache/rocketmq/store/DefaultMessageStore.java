@@ -536,6 +536,22 @@ public class DefaultMessageStore implements MessageStore {
         this.consumeQueueStore.destroy();
     }
 
+    /**
+     * 异步追加消息的整体流程：
+     * 1、将消息直接追加到ByteBuffer（堆外内存DirectByteBuffer），
+     *    wrotePosition随着消息的不断追加向后移动。
+     * 2、CommitRealTimeService线程默认每200ms将ByteBuffer新追加
+     *   （wrotePosition减去commitedPosition）的数据提交到FileChannel中。
+     * 3、FileChannel在通道中追加提交的内容，其wrotePosition指针向前后移动，然后返回。
+     * 4、commit操作成功返回，将commitedPosition向前后移动本次提交的内容长度，
+     *    此时wrotePosition指针依然可以向前推进。
+     * 5、FlushRealTimeService线程默认每500ms将FileChannel中新追加的内存
+     *   （wrotePosition减去上一次写入位置flushedPositiont），通过调用
+     *    FileChannel#force()方法将数据写入磁盘。
+     *
+     * @param msg MessageInstance to store
+     * @return
+     */
     @Override
     public CompletableFuture<PutMessageResult> asyncPutMessage(MessageExtBrokerInner msg) {
 
@@ -607,11 +623,25 @@ public class DefaultMessageStore implements MessageStore {
         return putResultFuture;
     }
 
+    /**
+     * 调用 asyncPutMessage 异步将消息追加到存储引擎并返回一个 Future。
+     * 再调用 waitForPutResult 等待 Future 的执行结果（直到刷盘成功或者失败）。
+     *
+     * @param msg Message instance to store
+     * @return
+     */
     @Override
     public PutMessageResult putMessage(MessageExtBrokerInner msg) {
         return waitForPutResult(asyncPutMessage(msg));
     }
 
+    /**
+     * 调用 asyncPutMessage 异步将消息追加到存储引擎并返回一个 Future。
+     * 再调用 waitForPutResult 等待 Future 的执行结果（直到刷盘成功或者失败）。
+     *
+     * @param messageExtBatch MessageExtBatch instance to store
+     * @return
+     */
     @Override
     public PutMessageResult putMessages(MessageExtBatch messageExtBatch) {
         return waitForPutResult(asyncPutMessages(messageExtBatch));
@@ -1654,6 +1684,10 @@ public class DefaultMessageStore implements MessageStore {
         // }, 1, 1, TimeUnit.HOURS);
     }
 
+    /**
+     * 调用两个过期文件（CommitLog、ConsumeQueue）删除服务。
+     * 删除过期文件后调用修正逻辑偏移量服务。
+     */
     private void cleanFilesPeriodically() {
         this.cleanCommitLogService.run();
         this.cleanConsumeQueueService.run();
@@ -1930,6 +1964,9 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * 清理CommitLog文件服务
+     */
     class CleanCommitLogService {
 
         private final static int MAX_MANUAL_DELETE_FILE_TIMES = 20;
@@ -1946,6 +1983,11 @@ public class DefaultMessageStore implements MessageStore {
 
         private int forceCleanFailedTimes = 0;
 
+        /**
+         * 通过系统参数Drocketmq.broker.diskSpaceWarningLevelRatio
+         * 进行设置，默认0.90。如果磁盘分区使用率超过该阈值，将设置磁盘
+         * 为不可写，此时会拒绝写入新消息。
+         */
         double getDiskSpaceWarningLevelRatio() {
             double finalDiskSpaceWarningLevelRatio;
             if ("".equals(diskSpaceWarningLevelRatio)) {
@@ -1964,6 +2006,11 @@ public class DefaultMessageStore implements MessageStore {
             return finalDiskSpaceWarningLevelRatio;
         }
 
+        /**
+         * 通过系统参数Drocketmq.broker.diskSpaceCleanForcibly-Ratio
+         * 进行设置，默认0.85。如果磁盘分区使用超过该阈值，建议立即执行过
+         * 期文件删除，但不会拒绝写入新消息。
+         */
         double getDiskSpaceCleanForciblyRatio() {
             double finalDiskSpaceCleanForciblyRatio;
             if ("".equals(diskSpaceCleanForciblyRatio)) {
@@ -1998,15 +2045,27 @@ public class DefaultMessageStore implements MessageStore {
 
         private void deleteExpiredFiles() {
             int deleteCount = 0;
+            // 文件保留时间，如果超过了该时间，则认为是过期文件，可以被删除。
             long fileReservedTime = DefaultMessageStore.this.getMessageStoreConfig().getFileReservedTime();
+            // 删除物理文件的间隔时间，在一次清除过程中，可能需要被删除的文件不止一个，该值指定两次删除文件的间隔时间。
             int deletePhysicFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteCommitLogFilesInterval();
+            // 在清除过期文件时，如果该文件被其他线程占用（引用次数大于0，比如读取消
+            // 息），此时会阻止此次删除任务，同时在第一次试图删除该文件时记录当前时间戳，
+            // destroyMapedFileIntervalForcibly 表示第一次拒绝删除之后能保留文件的
+            // 最大时间，在此时间内，同样可以被拒绝删除，超过该时间后，会将引用次数设置
+            // 为负数，文件将被强制删除，
             int destroyMappedFileIntervalForcibly = DefaultMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
             int deleteFileBatchMax = DefaultMessageStore.this.getMessageStoreConfig().getDeleteFileBatchMax();
 
+            // 指定删除文件的时间点，RocketMQ通过deleteWhen设置每天在固定时间执行一次删除过期文件操作，默认凌晨4点。
             boolean isTimeUp = this.isTimeToDelete();
+            // 检查磁盘空间是否充足，如果磁盘空间不充足，则返回true，表示应该触发过期文件删除操作。
             boolean isUsageExceedsThreshold = this.isSpaceToDelete();
+            // 预留手工触发机制，可以通过调用 excuteDeleteFilesManualy 方法手工
+            // 触发删除过期文件的操作，目前RocketMQ暂未封装手工触发文件删除的命令。
             boolean isManualDelete = this.manualDeleteFileSeveralTimes > 0;
 
+            // 满足条件则执行删除逻辑
             if (isTimeUp || isUsageExceedsThreshold || isManualDelete) {
 
                 if (isManualDelete) {
@@ -2067,7 +2126,17 @@ public class DefaultMessageStore implements MessageStore {
             return false;
         }
 
+        /**
+         * 判断磁盘空间是否充足
+         *
+         * 如果当前磁盘分区使用率大于diskSpaceWarningLevelRatio，应该立即启动过
+         * 期文件删除操作。如果当前磁盘分区使用率大于diskSpaceCleanForciblyRatio，
+         * 建议立即执行过期文件清除，如果磁盘使用率低于diskSpaceCleanForciblyRatio
+         * 将恢复磁盘可写。如果当前磁盘使用率小于diskMaxUsedSpaceRatio，则返回false，
+         * 表示磁盘使用率正常，否则返回true，需要执行删除过期文件.
+         */
         private boolean isSpaceToDelete() {
+            // 表示是否需要立即执行清除过期文件的操作。
             cleanImmediately = false;
 
             String commitLogStorePath = DefaultMessageStore.this.getMessageStoreConfig().getStorePathCommitLog();
@@ -2076,6 +2145,8 @@ public class DefaultMessageStore implements MessageStore {
             double minPhysicRatio = 100;
             String minStorePath = null;
             for (String storePathPhysic : storePaths) {
+                // 当前CommitLog目录所在的磁盘分区的磁盘使用率，通过File#getTotalSpace方法获取文
+                // 件所在磁盘分区的总容量，通过File#getFreeSpace方法获取文件所在磁盘分区的剩余容量。
                 double physicRatio = UtilAll.getDiskPartitionSpaceUsedPercent(storePathPhysic);
                 if (minPhysicRatio > physicRatio) {
                     minPhysicRatio = physicRatio;
@@ -2127,6 +2198,7 @@ public class DefaultMessageStore implements MessageStore {
                 }
             }
 
+            // getDiskMaxUsedSpaceRatio()表示CommitLog文件、ConsumeQueue文件所在磁盘分区的最大使用量，如果超过该值，则需要立即清除过期文件。
             double ratio = DefaultMessageStore.this.getMessageStoreConfig().getDiskMaxUsedSpaceRatio() / 100.0;
             int replicasPerPartition = DefaultMessageStore.this.getMessageStoreConfig().getReplicasPerDiskPartition();
             // Only one commitLog in node
@@ -2214,6 +2286,9 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * 清理ConsumeQueue文件服务
+     */
     class CleanConsumeQueueService {
         private long lastPhysicalMinOffset = 0;
 

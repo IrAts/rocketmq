@@ -68,6 +68,7 @@ public class DefaultMappedFile extends AbstractMappedFile {
     /**
      * 当前文件的提交指针，如果开启 transientStorePollEnable，
      * 则数据会存储在 TransientStorePool 中，然后提交到内存映射 ByteBuffer 中，再写入磁盘。
+     * 该指针指向已经从 TransientStorePool 提交到 ByteBuffer 中的位置。
      */
     protected final AtomicInteger committedPosition = new AtomicInteger(0);
     /**
@@ -310,7 +311,7 @@ public class DefaultMappedFile extends AbstractMappedFile {
     }
 
     /**
-     * Content of data from offset to offset + length will be written to file.
+     * 如果该消息的追加会导致当前 MappedFile 的大小超过预期文件大小，将不会追加该消息并返回 false。
      *
      * @param offset The offset of the subarray to be used.
      * @param length The length of the subarray to be used.
@@ -346,6 +347,7 @@ public class DefaultMappedFile extends AbstractMappedFile {
     public int flush(final int flushLeastPages) {
         if (this.isAbleToFlush(flushLeastPages)) {
             if (this.hold()) {
+                // 获取可以读取的被读取的数据位置，根据是否开启 transientStorePollEnable 返回不同的指针值。
                 int value = getReadPosition();
 
                 try {
@@ -571,10 +573,9 @@ public class DefaultMappedFile extends AbstractMappedFile {
 
     /**
      * 入参intervalForcibly：表示拒绝被销毁的最大存活时间。
-     * 1、关闭 MappedFile。除此调用时 this.
+     * 1、关闭 MappedFile。
      * 2、判断是否清理完成，判断标准是引用次数小于、等于0并且 cleanupOver 为 true。cleanupOver == true 的触发条件是第一步的shutdown方法成功的将 MappedByteBuffer 释放掉。
      * 3、关闭文件通道，删除物理文件。
-     *
      *
      * @param intervalForcibly If {@code true} then this method will destroy the file forcibly and ignore the reference
      * @return
