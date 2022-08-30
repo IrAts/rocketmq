@@ -272,6 +272,7 @@ public interface MessageStore {
     /**
      * Get the store time of the message specified.
      *
+     *
      * @param topic message topic.
      * @param queueId queue ID.
      * @param consumeQueueOffset consume queue offset.
@@ -376,10 +377,9 @@ public interface MessageStore {
 
     /**
      * 检查给定的消息是否已从内存中换出。
-     * Check if the given message has been swapped out of the memory.
      *
      * @param topic topic.
-     *
+     * @param queueId queue ID.
      * @param consumeOffset consume queue offset.
      * @return true if the message is no longer in memory; false otherwise.
      */
