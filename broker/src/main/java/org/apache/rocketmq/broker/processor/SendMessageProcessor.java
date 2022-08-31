@@ -279,13 +279,15 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             if (sendTransactionPrepareMessage) {
                 asyncPutMessageFuture = this.brokerController.getTransactionalMessageService().asyncPrepareMessage(msgInner);
             } else {
-                // 存储消息
+                // 存储消息，该 asyncPutMessage 的逻辑里【可能】会执行多机复制操作、同步刷盘操作。
                 asyncPutMessageFuture = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
             }
 
             final int finalQueueIdInt = queueIdInt;
             final MessageExtBrokerInner finalMsgInner = msgInner;
             asyncPutMessageFuture.thenAcceptAsync(putMessageResult -> {
+                // 当 asyncPutMessageFuture 的状态推进到完成时，将会使用 this.brokerController.getPutMessageFutureExecutor() 线程池
+                // 来执行本段 lambada 代码。
                 RemotingCommand responseFuture =
                     handlePutMessageResult(putMessageResult, response, request, finalMsgInner, responseHeader, sendMessageContext,
                         ctx, finalQueueIdInt, beginTimeMillis, mappingContext);

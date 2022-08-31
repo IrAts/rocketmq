@@ -1008,6 +1008,9 @@ public class CommitLog implements Swappable {
         storeStatsService.getSinglePutMessageTopicTimesTotal(msg.getTopic()).add(1);
         storeStatsService.getSinglePutMessageTopicSizeTotal(topic).add(result.getWroteBytes());
 
+        // putMessageResult 的状态为 PUT_OK，上面讲消息追加到 MappedFile 就算成功，并不请求刷盘。
+        // 在方法 handleDiskFlushAndHA 里，会根据 putMessageResult 以及是否需要多机荣誉数据来
+        // 进一步处理消息（多机复制操作）。最后在生成 Future 返回。
         return handleDiskFlushAndHA(putMessageResult, msg, needAckNums, needHandleHA);
     }
 
@@ -1184,16 +1187,26 @@ public class CommitLog implements Swappable {
         return true;
     }
 
+    /**
+     * 根据是否需要复制多机冗余数据来进一步处理。
+     */
     private CompletableFuture<PutMessageResult> handleDiskFlushAndHA(PutMessageResult putMessageResult,
         MessageExt messageExt, int needAckNums, boolean needHandleHA) {
+        // 根据 Broker 的设置（刷盘模式）来决定唤醒消息刷盘服务/消息提交服务，并返回对应操作的 刷盘Future。
+        // 如果 Broker 的设置是异步刷盘模式的话，返回的 Future 是已完成状态。
+        // 如果 Broker 的设置是同步刷盘模式的话，返回的 Future 大概率处于未完成状态，需要等待 Future 的完成。
         CompletableFuture<PutMessageStatus> flushResultFuture = handleDiskFlush(putMessageResult.getAppendMessageResult(), messageExt);
+
+        // 根据是否需要多机荣誉数据来生成额外的 子Future，该 子Future 将与 刷盘Future 合并。
         CompletableFuture<PutMessageStatus> replicaResultFuture;
         if (!needHandleHA) {
             replicaResultFuture = CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
         } else {
+            // 执行数据多机复制，主要时将消息包装为 GroupCommitRequest 并提交到 HaService 中即可。
             replicaResultFuture = handleHA(putMessageResult.getAppendMessageResult(), putMessageResult, needAckNums);
         }
 
+        // 将刷盘、复制合并成一个联合任务执行，这里设置消息追加的最终状态
         return flushResultFuture.thenCombine(replicaResultFuture, (flushStatus, replicaStatus) -> {
             if (flushStatus != PutMessageStatus.PUT_OK) {
                 putMessageResult.setPutMessageStatus(flushStatus);
