@@ -32,6 +32,15 @@ import org.apache.rocketmq.common.protocol.heartbeat.ConsumeType;
 import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
 import org.apache.rocketmq.common.protocol.heartbeat.SubscriptionData;
 
+/**
+ * <h1>消费组信息</h1>
+ * 重要属性：
+ *  <l1/>groupName
+ *  <l1/>subscriptionTable Map<(String)topic, SubscriptionData>
+ *  <l1/>ConcurrentMap<(Channel), ClientChannelInfo> channelInfoTable 一个Channel代表一个消费者，寻找消费者的Channel时使用ClientId查找。
+ *  <l1/>consumeType 消费类型：拉、推
+ *  <l1/>messageModel 消费模式：广播，集群
+ */
 public class ConsumerGroupInfo {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
     private final String groupName;

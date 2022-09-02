@@ -231,7 +231,7 @@ public class ConsumerFilterManager extends ConfigManager {
         ConsumerFilterManager load = RemotingSerializable.fromJson(jsonString, ConsumerFilterManager.class);
         if (load != null && load.filterDataByTopic != null) {
             boolean bloomChanged = false;
-            for (Entry<String, FilterDataMapByTopic> entry : load.filterDataByTopic.entrySet()) {
+            for (Entry<String/*Topic*/, FilterDataMapByTopic> entry : load.filterDataByTopic.entrySet()) {
                 FilterDataMapByTopic dataMapByTopic = entry.getValue();
                 if (dataMapByTopic == null) {
                     continue;
