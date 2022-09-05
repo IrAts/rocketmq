@@ -94,9 +94,10 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     private MessageModel messageModel = MessageModel.CLUSTERING;
 
     /**
-     * 根据消息进度从消息服务器拉取不到消息时重新计算消费策略
-     * CONSUME_FROM_LAST_OFFSET 从队列当前最大偏移量开始消费
-     * CONSUME_FROM_FIRST_OFFSET 从最早可用的消息开始消费
+     * 该参数控制的是：仅当在没有位点时决定从何处消费。
+     * 根据消息进度从消息服务器拉取不到消息时重新计算消费策略：
+     * CONSUME_FROM_LAST_OFFSET 分两种情况，如果磁盘消息未过期且未被删除，则从最小偏移量开始消费。如果磁盘已过期并被删除，则从最大偏移量开始消费。
+     * CONSUME_FROM_FIRST_OFFSET 从队列当前最小偏移量开始消费
      * CONSUME_FROM_TIMESTAMP 从指定的时间戳开始消费
      *
      * Consuming point on consumer booting.
@@ -140,13 +141,13 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     private String consumeTimestamp = UtilAll.timeMillisToHumanString3(System.currentTimeMillis() - (1000 * 60 * 30));
 
     /**
-     * 集群模式下消息队列负载策略
+     * 集群模式下消息队列的负载策略
      * Queue allocation algorithm specifying how message queues are allocated to each consumer clients.
      */
     private AllocateMessageQueueStrategy allocateMessageQueueStrategy;
 
     /**
-     * 订阅信息
+     * 订阅信息，key=(String)topic，value=(String)sub expression
      * Subscription relationship
      */
     private Map<String /* topic */, String /* sub expression */> subscription = new HashMap<String, String>();
@@ -237,7 +238,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     private long pullInterval = 0;
 
     /**
-     * 消息并发消费时一次消费消息条数
+     * 消息并发消费时一次消费消息条数，通俗点说，就是每次传入 MessageListener#consumeMessage 中的消息条数
      * Batch consumption size
      */
     private int consumeMessageBatchMaxSize = 1;
@@ -263,7 +264,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     private boolean unitMode = false;
 
     /**
-     * 最大消费重试次数，消息消费次数超过 maxReconsumeTimes 还未成功，则将该消息转移到一个失败队列，等待删除
+     * 最大消费重试次数，消息消费次数超过 maxReconsumeTimes 还未成功，则将该消息转移到一个失败队列，等待删除。
      *
      * Max re-consume times.
      * In concurrently mode, -1 means 16;
@@ -274,6 +275,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     private int maxReconsumeTimes = -1;
 
     /**
+     * 延迟将该队列的消息提交到消费者线程的等待时间，默认延迟 1s。
      * Suspending pulling time for cases requiring slow pulling like flow-control scenario.
      */
     private long suspendCurrentQueueTimeMillis = 1000;

@@ -936,7 +936,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                 this.checkConfig();
 
-                // 1、构建 SubscriptionData 加入到 RebalanceImpl 订阅消息中。
+                // 1、构建主题订阅消息 SubscriptionData 加入到 RebalanceImpl 订阅消息中。
                 this.copySubscription();
 
                 if (this.defaultMQPushConsumer.getMessageModel() == MessageModel.CLUSTERING) {
@@ -945,7 +945,6 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                 // 2、初始化 MQClientInstance、RebalanceImpl 等。
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQPushConsumer, this.rpcHook);
-
                 this.rebalanceImpl.setConsumerGroup(this.defaultMQPushConsumer.getConsumerGroup());
                 this.rebalanceImpl.setMessageModel(this.defaultMQPushConsumer.getMessageModel());
                 this.rebalanceImpl.setAllocateMessageQueueStrategy(this.defaultMQPushConsumer.getAllocateMessageQueueStrategy());
@@ -978,7 +977,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 }
                 this.offsetStore.load();
 
-                // 4、根据是否是顺序消费，创建不同的 ConsumeMessageService。该类主要负责消息的消费。
+                // 4、根据是否是顺序消费，创建消费端消费线程服务。ConsumeMessageService 主要负责消息消费，在内部维护一个线程池。
                 if (this.getMessageListenerInner() instanceof MessageListenerOrderly) {
                     this.consumeOrderly = true;
                     this.consumeMessageService =
